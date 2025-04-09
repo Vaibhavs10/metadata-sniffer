@@ -21,6 +21,10 @@ def validate_metadata(entry: Dict[str, Any]) -> List[str]:
     # Check for license
     if 'license' not in entry:
         issues.append(f"Missing license for model {entry.get('id', 'unknown')}")
+        
+    # Check for config
+    if 'config' not in entry:
+        issues.append(f"Missing config for model {entry.get('id', 'unknown')}")
     
     return issues
 
