@@ -16,13 +16,14 @@ current_date = datetime.now().strftime("%Y-%m-%d")
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
 
 # Function to fetch trending models for a specific task
-def fetch_trending_models(limit=25):
+def fetch_trending_models(limit=100):
     url = f"https://huggingface.co/api/models"
     params = {
         "limit": limit,
         "sort": "trending",
         "full": "True",
-        "config": "True"
+        "config": "True",
+        "direction": -1,
     }
     
     headers = {}
