@@ -3,48 +3,53 @@ import os
 from pathlib import Path
 from typing import Dict, List, Any
 
-def validate_metadata(entry: Dict[str, Any]) -> List[str]:
+def validate_metadata(entry: Dict[str, Any]) -> Dict[str, Any]:
     """
     Validate a single model entry's metadata.
-    Returns a list of validation issues found.
+    Returns a dictionary containing validation issues and model info.
     """
     issues = []
+    model_id = entry.get('id', 'unknown')
     
     # Check for library_name
     if 'library_name' not in entry:
-        issues.append(f"Missing library_name for model {entry.get('id', 'unknown')}")
+        issues.append("Missing library_name")
     
     # Check for pipeline_tag
     if 'pipeline_tag' not in entry:
-        issues.append(f"Missing pipeline_tag for model {entry.get('id', 'unknown')}")
+        issues.append("Missing pipeline_tag")
     
     # Check for license
     if 'license' not in entry:
-        issues.append(f"Missing license for model {entry.get('id', 'unknown')}")
+        issues.append("Missing license")
         
     # Check for config
     if 'config' not in entry:
-        issues.append(f"Missing config for model {entry.get('id', 'unknown')}")
+        issues.append("Missing config")
     
-    return issues
+    return {
+        'model_id': model_id,
+        'repo_url': f"https://huggingface.co/{model_id}",
+        'issues': issues
+    }
 
-def process_json_file(file_path: Path) -> Dict[str, List[str]]:
+def process_json_file(file_path: Path) -> Dict[str, Any]:
     """
     Process a single JSON file and return validation results.
     """
     with open(file_path, 'r') as f:
         data = json.load(f)
     
-    all_issues = []
+    model_issues = {}
     for entry in data:
-        issues = validate_metadata(entry)
-        if issues:
-            all_issues.extend(issues)
+        validation_result = validate_metadata(entry)
+        if validation_result['issues']:
+            model_issues[validation_result['model_id']] = validation_result
     
     return {
         'file': str(file_path),
         'total_entries': len(data),
-        'issues': all_issues
+        'models_with_issues': model_issues
     }
 
 def main():
@@ -62,10 +67,14 @@ def main():
         results = process_json_file(json_file)
         
         print(f"Total entries: {results['total_entries']}")
-        if results['issues']:
-            print("\nValidation Issues:")
-            for issue in results['issues']:
-                print(f"- {issue}")
+        if results['models_with_issues']:
+            print("\nModels with Validation Issues:")
+            for model_id, model_data in results['models_with_issues'].items():
+                print(f"\nModel: {model_id}")
+                print(f"Repository: {model_data['repo_url']}")
+                print("Issues:")
+                for issue in model_data['issues']:
+                    print(f"  - {issue}")
         else:
             print("No validation issues found!")
 
