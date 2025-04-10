@@ -39,7 +39,7 @@ if __name__ == "__main__":
 
     try:
         huggingface_api = HfApi()
-        trending_models = fetch_trending_models(huggingface_api, max_models=10)
+        trending_models = fetch_trending_models(huggingface_api, max_models=100)
 
         all_model_details = []
         for model in trending_models:
@@ -58,6 +58,8 @@ if __name__ == "__main__":
         output_file = f"{data_folder}/{today}.json"
         with open(output_file, "w") as json_file:
             json.dump(all_model_details, json_file, indent=2, default=serialize_to_string)
+        
+        huggingface_api.upload_file(path_or_fileobj=output_file, repo_id="ariG23498/trending_models", repo_type="dataset", path_in_repo=output_file)
 
     except Exception as e:
         print(f"Error occurred: {e}")
