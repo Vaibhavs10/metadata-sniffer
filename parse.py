@@ -27,9 +27,19 @@ def validate_metadata(entry: Dict[str, Any]) -> Dict[str, Any]:
     if 'config' not in entry:
         issues.append("Missing config")
     
+    # Check for custom_code tag
+    tags = entry.get('tags', [])
+    if 'custom_code' in tags:
+        issues.append("Has custom_code tag")
+    
+    # Generate URLs
+    repo_url = f"https://huggingface.co/{model_id}"
+    colab_url = f"https://colab.research.google.com/#fileId=https%3A//huggingface.co/{model_id}.ipynb"
+    
     return {
         'model_id': model_id,
-        'repo_url': f"https://huggingface.co/{model_id}",
+        'repo_url': repo_url,
+        'colab_url': colab_url,
         'issues': issues
     }
 
@@ -72,6 +82,7 @@ def main():
             for model_id, model_data in results['models_with_issues'].items():
                 print(f"\nModel: {model_id}")
                 print(f"Repository: {model_data['repo_url']}")
+                print(f"Colab: {model_data['colab_url']}")
                 print("Issues:")
                 for issue in model_data['issues']:
                     print(f"  - {issue}")
