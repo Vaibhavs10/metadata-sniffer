@@ -23,7 +23,6 @@ def fetch_trending_models(limit=100):
         "sort": "trending",
         "full": "True",
         "config": "True",
-        "direction": -1,
     }
     
     headers = {}

@@ -63,7 +63,7 @@ def process_json_file(file_path: Path) -> Dict[str, Any]:
     }
 
 def main():
-    # Get all JSON files in the trending_data directory
+    # Get the latest JSON file in the trending_data directory
     trending_dir = Path('trending_data')
     json_files = list(trending_dir.glob('*.json'))
     
@@ -71,23 +71,24 @@ def main():
         print("No JSON files found in trending_data directory")
         return
     
-    # Process each file
-    for json_file in json_files:
-        print(f"\nProcessing {json_file.name}...")
-        results = process_json_file(json_file)
-        
-        print(f"Total entries: {results['total_entries']}")
-        if results['models_with_issues']:
-            print("\nModels with Validation Issues:")
-            for model_id, model_data in results['models_with_issues'].items():
-                print(f"\nModel: {model_id}")
-                print(f"Repository: {model_data['repo_url']}")
-                print(f"Colab: {model_data['colab_url']}")
-                print("Issues:")
-                for issue in model_data['issues']:
-                    print(f"  - {issue}")
-        else:
-            print("No validation issues found!")
+    # Sort files by modification time and get the latest one
+    latest_file = max(json_files, key=lambda x: x.stat().st_mtime)
+    
+    print(f"\nProcessing latest file: {latest_file.name}...")
+    results = process_json_file(latest_file)
+    
+    print(f"Total entries: {results['total_entries']}")
+    if results['models_with_issues']:
+        print("\nModels with Validation Issues:")
+        for model_id, model_data in results['models_with_issues'].items():
+            print(f"\nModel: {model_id}")
+            print(f"Repository: {model_data['repo_url']}")
+            print(f"Colab: {model_data['colab_url']}")
+            print("Issues:")
+            for issue in model_data['issues']:
+                print(f"  - {issue}")
+    else:
+        print("No validation issues found!")
 
 if __name__ == "__main__":
     main() 
