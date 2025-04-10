@@ -19,9 +19,9 @@ def validate_metadata(entry: Dict[str, Any]) -> Dict[str, Any]:
     if 'pipeline_tag' not in entry:
         issues.append("Missing pipeline_tag")
     
-    # Check for license
-    if 'license' not in entry:
-        issues.append("Missing license")
+    # # Check for license - Removing this as this is not something we should interfere with
+    # if 'license' not in entry:
+    #     issues.append("Missing license")
         
     # Check for config
     if 'config' not in entry:
