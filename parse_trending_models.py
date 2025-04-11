@@ -26,7 +26,7 @@ def check_model_metadata(model, problematic_models):
     if "custom_code" in (model.tags or []):
         problematic_models["models_with_custom_code"].append(model.id)
 
-def format_issues_block(problematic_models):
+def format_issues_block(problematic_models, today):
     blocks = []
 
     def add_section(title, model_ids, chunk_size=15):
@@ -41,12 +41,12 @@ def format_issues_block(problematic_models):
                 "type": "section",
                 "text": {"type": "mrkdwn", "text": block_text}
             })
-            blocks.append({"type": "divider"})
+        blocks.append({"type": "divider"})
 
 
     blocks.append({
         "type": "header",
-        "text": {"type": "plain_text", "text": "🔍 Trending Model Issues Report", "emoji": True}
+        "text": {"type": "plain_text", "text": f"🔍 Trending Model Issues Report {today}", "emoji": True}
     })
 
     add_section("📚 Models without a Library Name", problematic_models["models_with_no_library_name"])
@@ -94,8 +94,7 @@ if __name__ == "__main__":
             send_slack_message(slack_webhook_url, message=upload_message)
 
     if slack_webhook_url and any(problematic_models.values()):
-        slack_blocks = format_issues_block(problematic_models)
-        print(slack_blocks)
+        slack_blocks = format_issues_block(problematic_models, today=today)
         send_slack_message(slack_webhook_url, blocks=slack_blocks["blocks"])
 
     print("Script completed.")
