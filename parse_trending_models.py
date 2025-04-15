@@ -27,6 +27,7 @@ AVOCADO_AUTHORS = [
     "sergiopaniego",
     "Steveeeeeeen",
     "ThomasSimonini",
+    "nielsr",
 ]
 
 
