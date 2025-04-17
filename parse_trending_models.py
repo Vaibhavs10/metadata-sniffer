@@ -38,7 +38,7 @@ class ModelChecker:
 
         self.hf_api = HfApi()
         self.data_folder = "trending_data"
-        self.repo_id = "ariG23498/trending_models"
+        self.repo_id = "model-metadata/trending_models"
         self.slack_webhook_url = os.getenv("SLACK_WEBHOOK_URL")
         self.today = datetime.now().strftime("%Y-%m-%d")
 
