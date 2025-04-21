@@ -98,6 +98,11 @@ class ModelChecker:
             "avocado_discussions": [],
         }
 
+        # Ignore GGUFs
+        if "gguf" in (model.tags or []):
+            logger.info(f"Skipping {model_id} as it is GGUF")
+            return result
+
         # Check if model has a discussion tab
         try:
             discussions = list(self.hf_api.get_repo_discussions(model_id))
@@ -154,10 +159,9 @@ class ModelChecker:
                 # Add discussions if available
                 discussions = self._get_model_discussions(model_id)
                 if discussions:
-                    block_text += "\n  _Discussions:_"
                     for disc in discussions:
                         block_text += (
-                            f"\n  → <{disc['url']}|{disc['title']}> by {disc['author']}"
+                            f"\n\t → <{disc['url']}|{disc['title']}> by {disc['author']}"
                         )
 
             blocks.append(
