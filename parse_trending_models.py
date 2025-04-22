@@ -1,5 +1,6 @@
 import argparse
 from huggingface_hub import HfApi, file_exists, upload_file
+from datasets import load_dataset
 import json
 from datetime import datetime
 import requests
@@ -39,6 +40,7 @@ class ModelChecker:
         self.hf_api = HfApi()
         self.data_folder = "trending_data"
         self.repo_id = "model-metadata/trending_models"
+        self.custom_code_ds_id = "model-metadata/model-id-custom-code-check"
         self.slack_webhook_url = os.getenv("SLACK_WEBHOOK_URL")
         self.today = datetime.now().strftime("%Y-%m-%d")
 
@@ -57,6 +59,13 @@ class ModelChecker:
 
         # Dictionary to store Avocado team discussions for each model
         self.models_avocado_discussions = {}
+
+        # Load the custom code check dataset
+        custom_code_check_ds = load_dataset(self.custom_code_ds_id)
+        self.checked_custom_models = custom_code_check_ds["train"]["model_id"]
+        self.custom_model_id_to_description = {
+            key: value for key, value in zip(self.checked_custom_models, custom_code_check_ds["train"]["description"])
+        }
 
     def send_slack_message(
         self, message: Optional[str] = None, blocks: Optional[List[Dict]] = None
@@ -145,11 +154,19 @@ class ModelChecker:
             if not model_ids:
                 return
 
+            custom_model_snippet_check = False
+
             block_text = f"*{title}* (_{len(model_ids)} models_)"
             for model_id in model_ids:
                 # Find the seen status for this model
                 has_been_seen = self._has_model_been_seen(model_id)
                 status_emoji = "✅" if has_been_seen else "🔴"
+
+                if title == "🧑‍💻 Models with Custom Code":
+                    # check if the model snippets were checked
+                    custom_model_snippet_check = model_id in self.checked_custom_models
+                    status_emoji = "✅" if custom_model_snippet_check else "🔴"
+
 
                 # Create a clean URL without the emoji
                 block_text += (
@@ -163,6 +180,12 @@ class ModelChecker:
                         block_text += (
                             f"\n\t → <{disc['url']}|{disc['title']}> by {disc['author']}"
                         )
+                
+                if custom_model_snippet_check:
+                    desc = self.custom_model_id_to_description[model_id]
+                    block_text += (
+                        f"\n\t → Code was checked: {desc}"
+                    )
 
             blocks.append(
                 {"type": "section", "text": {"type": "mrkdwn", "text": block_text}}
