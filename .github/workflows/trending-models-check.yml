@@ -2,8 +2,7 @@ name: Daily Trending Models Check
 
 on:
   schedule:
-    # Run at 00:00 UTC every day
-    - cron: '0 0 * * *'
+    - cron: '0 7 * * *' # This is 9:00 AM CEST / 8:00 AM CET
   workflow_dispatch:  # Allow manual triggering
 
 jobs:
