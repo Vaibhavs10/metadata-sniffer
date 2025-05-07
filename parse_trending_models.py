@@ -1,5 +1,6 @@
 import argparse
 from huggingface_hub import HfApi, file_exists, upload_file
+from datasets import load_dataset
 import json
 from datetime import datetime
 import requests
@@ -36,9 +37,11 @@ class ModelChecker:
         self.debug = debug
         self.limit = limit
 
+        # Configurations for the ModelChecker
         self.hf_api = HfApi()
         self.data_folder = "trending_data"
         self.repo_id = "model-metadata/trending_models"
+        self.custom_code_ds_id = "model-metadata/model-id-custom-code-check"
         self.slack_webhook_url = os.getenv("SLACK_WEBHOOK_URL")
         self.today = datetime.now().strftime("%Y-%m-%d")
 
@@ -58,23 +61,17 @@ class ModelChecker:
         # Dictionary to store Avocado team discussions for each model
         self.models_avocado_discussions = {}
 
-    def send_slack_message(
-        self, message: Optional[str] = None, blocks: Optional[List[Dict]] = None
-    ) -> None:
-        if not self.slack_webhook_url:
-            logger.warning("Slack webhook URL not provided, skipping message")
-            return
-
-        payload = {"text": message or "Trending Model Issues"}
-        if blocks:
-            payload["blocks"] = blocks
-
-        try:
-            response = requests.post(self.slack_webhook_url, json=payload)
-            response.raise_for_status()
-            logger.info("Slack message sent successfully")
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to send Slack message: {e}")
+        # We have a dataset of all the models whose code snippets have been tried
+        # previously. We would not want to check them again, and notify the
+        # avocado team about it.
+        custom_code_check_ds = load_dataset(self.custom_code_ds_id)
+        self.checked_custom_models = custom_code_check_ds["train"]["model_id"]
+        self.custom_model_id_to_description = {
+            key: value
+            for key, value in zip(
+                self.checked_custom_models, custom_code_check_ds["train"]["description"]
+            )
+        }
 
     def fetch_trending_models(self) -> List[Any]:
         logger.info(f"Fetching top {self.limit} trending models")
@@ -82,14 +79,9 @@ class ModelChecker:
             return self.hf_api.list_models(sort="trendingScore", limit=self.limit)
         except Exception as e:
             logger.error(f"Error fetching trending models: {e}")
-            return []
+            return None
 
     def check_model_metadata(self, model) -> Dict[str, Any]:
-        """Check model metadata and return model issues and status.
-
-        Returns:
-            A dictionary containing model ID, seen status, and any issues found.
-        """
         model_id = model.id
         result = {
             "id": model_id,
@@ -98,7 +90,13 @@ class ModelChecker:
             "avocado_discussions": [],
         }
 
-        # Check if model has a discussion tab
+        # Ignore GGUFs
+        if "gguf" in (model.tags or []):
+            logger.info(f"Skipping {model_id} as it is GGUF")
+            return result
+
+        # Some models do not have a discussion tab and it does not make
+        # sense for the avocado team to check such models
         try:
             discussions = list(self.hf_api.get_repo_discussions(model_id))
 
@@ -132,113 +130,6 @@ class ModelChecker:
             result["issues"].append("models_with_custom_code")
 
         return result
-
-    def format_issues_block(self) -> Dict:
-        blocks = []
-
-        def add_section(title, model_ids):
-            if not model_ids:
-                return
-
-            block_text = f"*{title}* (_{len(model_ids)} models_)"
-            for model_id in model_ids:
-                # Find the seen status for this model
-                has_been_seen = self._has_model_been_seen(model_id)
-                status_emoji = "✅" if has_been_seen else "🔴"
-
-                # Create a clean URL without the emoji
-                block_text += (
-                    f"\n• <https://huggingface.co/{model_id}|{model_id}> {status_emoji}"
-                )
-
-                # Add discussions if available
-                discussions = self._get_model_discussions(model_id)
-                if discussions:
-                    block_text += "\n  _Discussions:_"
-                    for disc in discussions:
-                        block_text += (
-                            f"\n  → <{disc['url']}|{disc['title']}> by {disc['author']}"
-                        )
-
-            blocks.append(
-                {"type": "section", "text": {"type": "mrkdwn", "text": block_text}}
-            )
-            blocks.append({"type": "divider"})
-
-        blocks.append(
-            {
-                "type": "header",
-                "text": {
-                    "type": "plain_text",
-                    "text": f"🔍 Trending Model Issues Report {self.today}",
-                    "emoji": True,
-                },
-            }
-        )
-
-        add_section(
-            "📚 Models without a Library Name",
-            self.problematic_models["models_with_no_library_name"],
-        )
-        add_section(
-            "🏷️ Models without a Pipeline Tag",
-            self.problematic_models["models_with_no_pipeline_tag"],
-        )
-        add_section(
-            "🧑‍💻 Models with Custom Code",
-            self.problematic_models["models_with_custom_code"],
-        )
-        add_section(
-            "⛔️ Models without Discussion Tab",
-            self.problematic_models["models_with_no_discussion_tab"],
-        )
-
-        return {"blocks": blocks}
-
-    def _has_model_been_seen(self, model_id: str) -> bool:
-        return self.models_seen_status.get(model_id, False)
-
-    def _get_model_discussions(self, model_id: str) -> List[Dict]:
-        return self.models_avocado_discussions.get(model_id, [])
-
-    def process_models(self) -> None:
-        trending_models = self.fetch_trending_models()
-
-        if not trending_models:
-            logger.error("No trending models found. Exiting.")
-            return
-
-        logger.info(f"Processing {self.limit} trending models")
-
-        model_data = []
-        results = []
-
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            future_to_model = {
-                executor.submit(self.check_model_metadata, model): model
-                for model in trending_models
-            }
-
-            for future in as_completed(future_to_model):
-                model = future_to_model[future]
-                try:
-                    result = future.result()
-                    results.append(result)
-
-                    # Store model data regardless of issues
-                    # This will be dumped into a json and posted to a HF dataset
-                    model_data.append(model.__dict__)
-                except Exception as e:
-                    logger.error(f"Error processing model {model.id}: {e}")
-
-        self._categorize_problematic_models(results)
-
-        try:
-            with open(self.output_file, "w") as f:
-                json.dump(model_data, f, indent=2, default=str)
-            logger.info(f"Model data saved to {self.output_file}")
-        except Exception as e:
-            logger.error(f"Error saving model data: {e}")
 
     def _categorize_problematic_models(self, results: List[Dict[str, Any]]) -> None:
         # Reset problematic models dictionary to ensure a clean slate
@@ -293,6 +184,198 @@ class ModelChecker:
             logger.error(f"Error uploading to HuggingFace Hub: {e}")
             return False
 
+    def process_models(self) -> None:
+        trending_models = self.fetch_trending_models()
+
+        if trending_models is None:
+            logger.error("No trending models found. Exiting.")
+            return
+
+        logger.info(f"Processing {self.limit} trending models")
+
+        model_data = []
+        results = []
+
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_model = {
+                executor.submit(self.check_model_metadata, model): model
+                for model in trending_models
+            }
+
+            for future in as_completed(future_to_model):
+                model = future_to_model[future]
+                try:
+                    result = future.result()
+                    results.append(result)
+
+                    # Store model data regardless of issues
+                    # This will be dumped into a json and posted to a HF dataset
+                    model_data.append(model.__dict__)
+                except Exception as e:
+                    logger.error(f"Error processing model {model.id}: {e}")
+
+        self._categorize_problematic_models(results)
+
+        try:
+            with (
+                open(self.output_file, "w") as f
+            ):  # This creates a new output file per day, so that we do not overwite
+                json.dump(model_data, f, indent=2, default=str)
+            logger.info(f"Model data saved to {self.output_file}")
+            self.upload_to_hub()
+
+        except Exception as e:
+            logger.error(f"Error saving model data: {e}")
+
+    def send_slack_message(
+        self, message: Optional[str] = None, blocks: Optional[List[Dict]] = None
+    ) -> None:
+        if not self.slack_webhook_url:
+            logger.warning("Slack webhook URL not provided, skipping message")
+            return
+
+        # Handle simple text messages
+        if blocks is None:
+            self._send_simple_message(message or "Trending Model Issues")
+            return
+
+        # For block-based messages, chunk if necessary and send
+        self._send_chunked_blocks(blocks)
+
+    def _send_simple_message(self, message: str) -> None:
+        payload = {"text": message}
+        try:
+            response = requests.post(self.slack_webhook_url, json=payload)
+            response.raise_for_status()
+            logger.info("Slack message sent successfully")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to send Slack message: {e}")
+
+    def _send_chunked_blocks(self, blocks: List[Dict]) -> None:
+        MAX_BLOCKS_PER_MESSAGE = 45  # Leave room for header block
+        MAX_TEXT_LENGTH = 2800  # Conservative limit for text length
+
+        # First pass: divide blocks into chunks
+        chunks = []
+        current_chunk = []
+        current_text_length = 0
+
+        for block in blocks:
+            # Calculate the text length of this block
+            block_text_length = 0
+            if block.get("type") == "section" and block.get("text", {}).get("text"):
+                block_text_length = len(block["text"]["text"])
+
+            # Check if adding this block would exceed limits
+            if (
+                len(current_chunk) >= MAX_BLOCKS_PER_MESSAGE
+                or (current_text_length + block_text_length) > MAX_TEXT_LENGTH
+            ):
+                # Current chunk is full, store it and start a new one
+                if current_chunk:  # Only append non-empty chunks
+                    chunks.append(current_chunk)
+                current_chunk = [block]
+                current_text_length = block_text_length
+            else:
+                # Add to current chunk
+                current_chunk.append(block)
+                current_text_length += block_text_length
+
+        # Add the last chunk if it's not empty
+        if current_chunk:
+            chunks.append(current_chunk)
+
+        total_chunks = len(chunks)
+
+        # Send each chunk with appropriate headers
+        for i, chunk in enumerate(chunks, 1):
+            self._send_block_chunk(chunk, chunk_number=i, total_chunks=total_chunks)
+
+    def _send_block_chunk(
+        self, chunk: List[Dict], chunk_number: int, total_chunks: int
+    ) -> None:
+        payload = {"blocks": chunk}
+        try:
+            response = requests.post(self.slack_webhook_url, json=payload)
+            response.raise_for_status()
+            logger.info(
+                f"Sent chunk {chunk_number}/{total_chunks} of Slack blocks message"
+            )
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to send Slack blocks chunk {chunk_number}: {e}")
+
+    def format_issues_block(self) -> Dict:
+        blocks = []
+
+        def add_section(title, model_ids):
+            if not model_ids:
+                return
+
+            block_text = f"*{title}* (_{len(model_ids)} models_)"
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": block_text},
+                }
+            )
+
+            current_block_text = ""
+
+            for model_id in model_ids:
+                # Find the seen status for this model
+                has_been_seen = self.models_seen_status.get(model_id, False)
+                status_emoji = "✅" if has_been_seen else "🔴"
+
+                custom_model_snippet_check = False
+                if title == "🧑‍💻 Models with Custom Code":
+                    # Check if the model snippets were checked
+                    custom_model_snippet_check = model_id in self.checked_custom_models
+                    status_emoji = "✅" if custom_model_snippet_check else "🔴"
+
+                # Format the model line
+                model_line = (
+                    f"\n• <https://huggingface.co/{model_id}|{model_id}> {status_emoji}"
+                )
+
+                # Add discussions if available
+                discussions = self.models_avocado_discussions.get(model_id, [])
+                for discussion in discussions:
+                    model_line += f"\n\t → <{discussion['url']}|{discussion['title']}> by {discussion['author']}"
+
+                if custom_model_snippet_check:
+                    description = self.custom_model_id_to_description[model_id]
+                    model_line += f"\n\t → Code was checked: {description}"
+
+                current_block_text += model_line
+
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": current_block_text},
+                }
+            )
+
+            blocks.append({"type": "divider"})
+
+        add_section(
+            "📚 Models without a Library Name",
+            self.problematic_models["models_with_no_library_name"],
+        )
+        add_section(
+            "🏷️ Models without a Pipeline Tag",
+            self.problematic_models["models_with_no_pipeline_tag"],
+        )
+        add_section(
+            "🧑‍💻 Models with Custom Code",
+            self.problematic_models["models_with_custom_code"],
+        )
+        add_section(
+            "⛔️ Models without Discussion Tab",
+            self.problematic_models["models_with_no_discussion_tab"],
+        )
+
+        return blocks
+
     def notify_issues(self) -> None:
         if any(self.problematic_models.values()):
             slack_blocks = self.format_issues_block()
@@ -302,7 +385,14 @@ class ModelChecker:
                 logger.info("Slack blocks that would be sent:")
                 pprint.pp(slack_blocks)
             else:
-                self.send_slack_message(blocks=slack_blocks["blocks"])
+                # Check if any section is too large
+                total_size = sum(len(str(block)) for block in slack_blocks)
+                if total_size > 3000:  # Conservative limit
+                    logger.info(
+                        f"Large payload detected ({total_size} chars), sending in chunks"
+                    )
+
+                self.send_slack_message(blocks=slack_blocks)
                 logger.info("Sent issues notification to Slack")
         else:
             logger.info("No issues found with trending models")
@@ -310,7 +400,6 @@ class ModelChecker:
     def run(self) -> None:
         logger.info("Starting trending models check")
         self.process_models()
-        self.upload_to_hub()
         self.notify_issues()
         logger.info("Trending models check completed")
 

@@ -1,3 +1,4 @@
 .env
 .venv
 trending_data
+.ruff_cache
