@@ -330,7 +330,7 @@ class ModelChecker:
                 if title == "🧑‍💻 Models with Custom Code":
                     # Check if the model snippets were checked
                     custom_model_snippet_check = model_id in self.checked_custom_models
-                    status_emoji = "✅" if custom_model_snippet_check else "🔴"
+                    status_emoji = "✅" if custom_model_snippet_check or has_been_seen else "🔴"
 
                 # Format the model line
                 model_line = (
