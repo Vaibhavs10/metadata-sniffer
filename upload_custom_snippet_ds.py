@@ -1,26 +1,24 @@
-# from datasets import load_dataset, Dataset
+from datasets import load_dataset, concatenate_datasets, Dataset
 
-# model_id_description = {
-#     "nvidia/Llama-3_1-Nemotron-Ultra-253B-v1" : "too big",
-#     "microsoft/bitnet-b1.58-2B-4T" : "needs custom transformers installation",
-#     "OpenGVLab/InternVL3-78B" : "too big",
-#     "jinaai/jina-reranker-m0" : "works with AutoModel, does not with pipeline",
-#     "ServiceNow-AI/Apriel-5B-Instruct": "works with AutoModel, does not with pipeline",
-#     "ServiceNow-AI/Apriel-5B-Base" : "works with AutoModel, does not with pipeline",
-#     "OpenGVLab/InternVL3-1B" : "works with AutoModel, does not with pipeline",
-#     "nvidia/Llama-3_3-Nemotron-Super-49B-v1" : "too big",
-#     "briaai/RMBG-2.0" : "needs kornia to run AutoModel, pipeline fails anyways",
-#     "Dream-org/Dream-v0-Instruct-7B" : "works",
-#     "OpenGVLab/InternVL3-8B" : "works with AutoModel, does not with pipeline",
-#     "OpenGVLab/InternVL3-14B" : "works with AutoModel, does not with pipeline",
-#     "starvector/starvector-8b-im2svg": "needs custom installation",
-#     "microsoft/Phi-4-multimodal-instruct" : "needs backoff python package",
-# }
+def create_todays_ds():
+    model_id_description = {
+        "model_id": list(model_id_description.keys()),
+        "description": list(model_id_description.values()),
+    }
+    return Dataset.from_dict(model_id_description)
 
-# model_id_description = {
-#     "model_id": list(model_id_description.keys()),
-#     "description": list(model_id_description.values()),
-# }
-
-# ds = Dataset.from_dict(model_id_description)
-# ds.push_to_hub("model-metadata/model-id-custom-code-check", private=True)
+if __name__ == "__main__":
+    # Change this every day
+    model_id_description = {
+        "jinaai/jina-embeddings-v3": "works with sentence transformers",
+        "Alibaba-NLP/gte-Qwen2-7B-instruct": "works with sentence transformers",
+        "Trendyol/TY-ecomm-embed-multilingual-base-v1.2.0": "works with sentence transformers",
+        "deepseek-ai/DeepSeek-R1": "needs specific CUDA version to run",
+        "deepseek-ai/DeepSeek-V3-0324": "needs specific CUDA version to run",
+        "XiaomiMiMo/MiMo-7B-RL": "works with transformers automodel, but not with pipeline",
+        "deepseek-ai/DeepSeek-Prover-V2-671B": "needs specific CUDA version to run",
+    }
+    today_ds = create_todays_ds()
+    orig_ds = load_dataset("model-metadata/model-id-custom-code-check")
+    concatenated_ds = concatenate_datasets([orig_ds["train"], today_ds])
+    concatenate_datasets.push_to_hub("model-metadata/model-id-custom-code-check")
