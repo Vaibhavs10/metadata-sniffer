@@ -253,7 +253,7 @@ class ModelChecker:
 
     def _send_chunked_blocks(self, blocks: List[Dict]) -> None:
         MAX_BLOCKS_PER_MESSAGE = 45  # Leave room for header block
-        MAX_TEXT_LENGTH = 2800  # Conservative limit for text length
+        MAX_TEXT_LENGTH = 2500  # Conservative limit for text length
 
         # First pass: divide blocks into chunks
         chunks = []
@@ -289,9 +289,9 @@ class ModelChecker:
 
         # Send each chunk with appropriate headers
         for i, chunk in enumerate(chunks, 1):
-            self._send_block_chunk(chunk, chunk_number=i, total_chunks=total_chunks)
+            self._send_chunk(chunk, chunk_number=i, total_chunks=total_chunks)
 
-    def _send_block_chunk(
+    def _send_chunk(
         self, chunk: List[Dict], chunk_number: int, total_chunks: int
     ) -> None:
         payload = {"blocks": chunk}
@@ -305,6 +305,7 @@ class ModelChecker:
             logger.error(f"Failed to send Slack blocks chunk {chunk_number}: {e}")
 
     def format_issues_block(self) -> Dict:
+        MAX_TEXT_LENGTH = 2500
         blocks = []
 
         def add_section(title, model_ids):
@@ -333,21 +334,30 @@ class ModelChecker:
                     status_emoji = "✅" if custom_model_snippet_check or has_been_seen else "🔴"
 
                 # Format the model line
-                model_line = (
+                current_block_text += (
                     f"\n• <https://huggingface.co/{model_id}|{model_id}> {status_emoji}"
                 )
 
                 # Add discussions if available
                 discussions = self.models_avocado_discussions.get(model_id, [])
                 for discussion in discussions:
-                    model_line += f"\n\t → <{discussion['url']}|{discussion['title']}> by {discussion['author']}"
+                    current_block_text += f"\n\t → <{discussion['url']}|{discussion['title']}> by {discussion['author']}"
 
                 if custom_model_snippet_check:
                     description = self.custom_model_id_to_description[model_id]
-                    model_line += f"\n\t → Code was checked: {description}"
+                    current_block_text += f"\n\t → Code was checked: {description}"
+                
+                # Chunk it down if exceeds.
+                if len(current_block_text) > MAX_TEXT_LENGTH:
+                    blocks.append(
+                        {
+                            "type": "section",
+                            "text": {"type": "mrkdwn", "text": current_block_text},
+                        }
+                    )
+                    current_block_text = ""
 
-                current_block_text += model_line
-
+            # Append block of text anyway
             blocks.append(
                 {
                     "type": "section",
