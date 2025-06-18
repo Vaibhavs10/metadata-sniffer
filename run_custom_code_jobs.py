@@ -5,10 +5,14 @@ from pathlib import Path
 from typing import List, Tuple, Dict, Optional
 import datetime
 import logging
+from dotenv import load_dotenv
 
 import requests
 from datasets import Dataset, load_dataset
 from huggingface_hub import HfApi, list_repo_files, upload_file
+
+# Load environment variables
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -43,6 +47,7 @@ GPU_VRAM_MAPPING = {
 VRAM_TO_GPU_MAPPING = dict(sorted({vram: gpu for gpu, vram in GPU_VRAM_MAPPING.items()}.items()))
 
 DOCKER_IMAGE_URL = "ghcr.io/astral-sh/uv:debian"
+# DOCKER_IMAGE_URL = "aritrarg/uv:debian-chown"
 
 # UV script header for Python dependencies
 UV_SCRIPT_HEADER = """\
@@ -340,10 +345,19 @@ def launch_hf_jobs():
             for script_path in matching_scripts:
                 script_url = f"https://huggingface.co/datasets/{HF_DATASET_CODE_REPO}/raw/main/{script_path}"
                 
+                # launch_command = (
+                #     f"hfjobs run --detach --flavor {selected_gpu} {DOCKER_IMAGE_URL} /bin/bash -c "
+                #     f'"export HOME=/tmp && export USER=dummy && uv run {script_url}"'
+                # )
                 launch_command = (
-                    f"hfjobs run --detach --flavor {selected_gpu} {DOCKER_IMAGE_URL} /bin/bash -c "
+                    f"hfjobs run --detach --secret HF_TOKEN={os.getenv('HF_TOKEN')} --flavor {selected_gpu} {DOCKER_IMAGE_URL} /bin/bash -c "
                     f'"export HOME=/tmp && export USER=dummy && uv run {script_url}"'
                 )
+                # launch_command = (
+                #     f"hfjobs run --detach --flavor {selected_gpu} {DOCKER_IMAGE_URL} /bin/bash -c "
+                #     f'"chown -R 1000:1000 /tmp && export HOME=/tmp && export USER=dummy && uv run {script_url}"'
+                # )
+
                 
                 try:
                     exit_code = os.system(launch_command)
