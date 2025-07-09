@@ -1,14 +1,15 @@
 import argparse
-from huggingface_hub import HfApi, file_exists, upload_file
-from datasets import load_dataset
 import json
-from datetime import datetime
-import requests
-import os
-from dotenv import load_dotenv
 import logging
-from typing import Dict, List, Any, Optional
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+import requests
+from datasets import Dataset, load_dataset
+from dotenv import load_dotenv
+from huggingface_hub import HfApi, file_exists, upload_file
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -40,8 +41,15 @@ class ModelChecker:
         # Configurations for the ModelChecker
         self.hf_api = HfApi()
         self.data_folder = "trending_data"
-        self.repo_id = "model-metadata/trending_models"
-        self.custom_code_ds_id = "model-metadata/model-id-custom-code-check"
+
+        self.trending_models_dataset_id = "model-metadata/trending_models"
+        self.custom_code_ds_id = (
+            "model-metadata/model-id-custom-code-check"  # Need to verfiy its usage
+        )
+        self.models_with_custom_code_dataset_id = (
+            "model-metadata/models_with_custom_code"
+        )
+
         self.slack_webhook_url = os.getenv("SLACK_WEBHOOK_URL")
         self.today = datetime.now().strftime("%Y-%m-%d")
 
@@ -162,10 +170,12 @@ class ModelChecker:
         # Only upload the json dump once in a day.
         try:
             if not file_exists(
-                repo_id=self.repo_id, filename=self.output_file, repo_type="dataset"
+                repo_id=self.trending_models_dataset_id,
+                filename=self.output_file,
+                repo_type="dataset",
             ):
                 upload_file(
-                    repo_id=self.repo_id,
+                    repo_id=self.trending_models_dataset_id,
                     path_or_fileobj=self.output_file,
                     path_in_repo=self.output_file,
                     repo_type="dataset",
@@ -174,11 +184,13 @@ class ModelChecker:
                 upload_message = f"Uploaded trending models data: {self.today}"
                 self.send_slack_message(message=upload_message)
                 logger.info(
-                    f"Successfully uploaded {self.output_file} to {self.repo_id}"
+                    f"Successfully uploaded {self.output_file} to {self.trending_models_dataset_id}"
                 )
                 return True
             else:
-                logger.info(f"File {self.output_file} already exists in {self.repo_id}")
+                logger.info(
+                    f"File {self.output_file} already exists in {self.trending_models_dataset_id}"
+                )
                 return False
         except Exception as e:
             logger.error(f"Error uploading to HuggingFace Hub: {e}")
@@ -331,7 +343,9 @@ class ModelChecker:
                 if title == "🧑‍💻 Models with Custom Code":
                     # Check if the model snippets were checked
                     custom_model_snippet_check = model_id in self.checked_custom_models
-                    status_emoji = "✅" if custom_model_snippet_check or has_been_seen else "🔴"
+                    status_emoji = (
+                        "✅" if custom_model_snippet_check or has_been_seen else "🔴"
+                    )
 
                 # Format the model line
                 current_block_text += (
@@ -346,7 +360,7 @@ class ModelChecker:
                 if custom_model_snippet_check:
                     description = self.custom_model_id_to_description[model_id]
                     current_block_text += f"\n\t → Code was checked: {description}"
-                
+
                 # Chunk it down if exceeds.
                 if len(current_block_text) > MAX_TEXT_LENGTH:
                     blocks.append(
@@ -410,6 +424,12 @@ class ModelChecker:
     def run(self) -> None:
         logger.info("Starting trending models check")
         self.process_models()
+
+        # Document the models with custom code into a dataset
+        Dataset.from_dict(
+            {"custom_code": self.problematic_models["models_with_custom_code"]}
+        ).push_to_hub(self.models_with_custom_code_dataset_id)
+
         self.notify_issues()
         logger.info("Trending models check completed")
 
