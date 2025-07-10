@@ -1,65 +1,69 @@
-# Trending Models Checker
-
-A tool that monitors trending models on the Hugging Face Hub and reports metadata issues to Slack.
+# Trending Models Pipeline
 
 ## Overview
 
-This script fetches the top trending models from Hugging Face, checks their metadata for common issues,
-and reports problems to a Slack channel. It also archives the daily trending model data to a HuggingFace dataset repository.
+The pipeline automates the following tasks:
 
-Issues checked:
-- Missing library name
-- Missing pipeline tag
-- Custom code usage
-- Missing discussion tab
+1. Fetches trending models from Hugging Face and checks their metadata for issues (e.g., missing library names, pipeline tags, or discussion tabs).
+2. Processes models with custom code by extracting snippets from Jupyter notebooks, wrapping them with error handling, and uploading them to Hugging Face datasets.
+3. Executes the processed scripts on Hugging Face jobs with GPU selection based on estimated VRAM requirements.
+4. Summarizes execution results and sends detailed reports to Slack, categorizing outcomes as successful, failed, or skipped.
+
 
 ## Installation
 
+1. Clone the repository:
+
+   ```bash
+   git clone https://github.com/your-username/trending-models-pipeline.git
+   cd trending-models-pipeline
+   ```
+
+2. Install dependencies:
+
+   ```bash
+   python -m pip install --upgrade pip
+   pip install -r requirements.txt
+   ```
+
+3. Create a `.env` file in the project root with the following variables:
+
+   ```env
+   HF_TOKEN=your_huggingface_api_token
+   SLACK_WEBHOOK_URL=your_slack_webhook_url
+   EXP_SLACK_WEBHOOK_URL=your_experiment_slack_webhook_url
+   ```
+
+## Usage
+
+To run the pipeline manually, execute the scripts in order:
+
 ```bash
-git clone https://github.com/Vaibhavs10/metadata-sniffer
-cd metadata-sniffer
+python 01_parse_trending_models.py
+python 02_process_models_with_custom_code.py
+python 03_execute_hf_jobs.py
+sleep 900  # Wait 15 minutes
+python 04_summarise_custom_code.py
+```
 
-pip install -r requirements.txt
+For automated execution, configure the GitHub Action workflow (see GitHub Actions).
 
-touch .env
+To run in debug mode (e.g., for `01_parse_trending_models.py`):
+
+```bash
+python 01_parse_trending_models.py --debug --verbose
 ```
 
 ## Configuration
 
-Create a `.env` file with the following variables:
+Environment variables in `.env`:
 
-```sh
-SLACK_WEBHOOK_URL=your_slack_webhook_url
-```
+- `HF_TOKEN`: Hugging Face API token for authentication.
+- `SLACK_WEBHOOK_URL`: Slack webhook for metadata issue notifications.
+- `EXP_SLACK_WEBHOOK_URL`: Slack webhook for execution summaries.
 
-**Note for Hugging Face team members:** Contact @ariG23498 to get the Slack webhook URL for your `.env` file.
+Additional configurations (hardcoded, consider externalizing):
 
-## Usage
-
-```bash
-# Basic usage
-python trending_checker.py
-
-# Debug mode (prints Slack messages without sending them)
-python trending_checker.py --debug
-
-# Limit the number of models checked
-python trending_checker.py --limit 50
-
-# Enable verbose logging
-python trending_checker.py --verbose
-```
-
-## Command Line Arguments
-
-- `-d, --debug`: Run in debug mode without sending Slack messages
-- `-l, --limit`: Limit the number of trending models to check (default: 100)
-- `--verbose`: Enable detailed logging
-
-## Output
-
-- Saves daily trending model data to `trending_data/{today's date}.json`
-- Uploads data to the HuggingFace dataset repository: `ariG23498/trending_models`
-- Sends Slack notifications about problematic models
-
-The README has been created with the help of Claude.
+- Dataset IDs: `model-metadata/trending_models`, `model-metadata/models_with_custom_code`, etc.
+- GPU VRAM mappings: Defined in `03_execute_hf_jobs.py`.
+- Slack message limits: Defined in `04_summarise_custom_code.py`.
