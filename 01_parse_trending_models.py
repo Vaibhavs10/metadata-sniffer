@@ -50,7 +50,7 @@ class ModelChecker:
             "model-metadata/models_with_custom_code"
         )
 
-        self.slack_webhook_url = os.getenv("SLACK_WEBHOOK_URL")
+        self.slack_webhook_url = os.getenv("EXP_SLACK_WEBHOOK_URL")
         self.today = datetime.now().strftime("%Y-%m-%d")
 
         os.makedirs(self.data_folder, exist_ok=True)

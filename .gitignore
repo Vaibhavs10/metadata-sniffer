@@ -1,7 +1,7 @@
 .env
 .venv
 trending_data
-.ruff_cache
 custom_code
+execution
+.ruff_cache
 __pycache__
-uv.lock

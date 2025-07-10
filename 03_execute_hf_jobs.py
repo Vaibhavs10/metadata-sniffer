@@ -2,6 +2,7 @@ import logging
 import os
 import re
 import subprocess
+from pathlib import Path
 
 from datasets import load_dataset
 from dotenv import load_dotenv
@@ -24,6 +25,9 @@ VRAM_TO_GPU_MAPPING = dict(
 )
 DOCKER_IMAGE_URL = "ghcr.io/astral-sh/uv:debian"
 
+LOCAL_CODE_DIR = Path("execution")
+LOCAL_CODE_DIR.mkdir(parents=True, exist_ok=True)
+
 pattern = r"ID:\s*([a-zA-Z0-9]+)\s*View at:\s*(https://huggingface\.co/jobs/[^/]+/\1)"
 
 
@@ -34,13 +38,14 @@ def select_appropriate_gpu(vram_required: float, execution_urls, model_id):
 
     for execution_url in execution_urls:
         file_name = execution_url.split("/")[-1]
-        with open(file_name, "w") as f:
-            f.write(
-                f"No suitable GPU found for {model_id} | {vram_required:.2f} GB VRAM requirement"
-            )
+        local_path = LOCAL_CODE_DIR / file_name
+        local_path.write_text(
+            f"No suitable GPU found for {model_id} | {vram_required:.2f} GB VRAM requirement",
+            encoding="utf-8",
+        )
 
         upload_file(
-            path_or_fileobj=file_name,
+            path_or_fileobj=local_path,
             repo_id="model-metadata/custom_code_execution_files",
             path_in_repo=file_name,
             repo_type="dataset",
@@ -74,7 +79,6 @@ if __name__ == "__main__":
             )
 
             try:
-                logger.info(launch_command)
                 result = subprocess.run(
                     launch_command,
                     shell=True,

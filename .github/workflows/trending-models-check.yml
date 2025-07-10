@@ -1,30 +1,48 @@
-name: Daily Trending Models Check
+name: Full Trending Models Pipeline
 
 on:
   schedule:
-    - cron: '0 7 * * *' # This is 9:00 AM CEST / 8:00 AM CET
-  workflow_dispatch:  # Allow manual triggering
+    - cron: '0 7 * * *' # Runs daily at 9:00 AM CEST / 8:00 AM CET
+  workflow_dispatch: # Allows manual triggering
 
 jobs:
-  check-trending-models:
+  run-pipeline:
     runs-on: ubuntu-latest
-    
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-      
+
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.12'
-        
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        
-    - name: Run trending models check
+
+    - name: Step 1 - Parse Trending Models
       env:
-        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        EXP_SLACK_WEBHOOK_URL: ${{ secrets.EXP_SLACK_WEBHOOK_URL }}
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      run: python parse_trending_models.py
+      run: python 01_parse_trending_models.py
+
+    - name: Step 2 - Process Models with Custom Code
+      env:
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      run: python 02_process_models_with_custom_code.py
+
+    - name: Step 3 - Execute HF Jobs
+      env:
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      run: python 03_execute_hf_jobs.py
+
+    - name: Wait 15 minutes
+      run: sleep 900 # 15 minutes in seconds
+      if: success() # Only wait if Step 3 succeeds
+
+    - name: Step 4 - Summarize Custom Code
+      env:
+        EXP_SLACK_WEBHOOK_URL: ${{ secrets.EXP_SLACK_WEBHOOK_URL }}
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      run: python 04_summarise_custom_code.py
