@@ -3,13 +3,14 @@ import os
 import re
 import subprocess
 from pathlib import Path
-
+from slack_sdk import WebClient
 from datasets import load_dataset
 from dotenv import load_dotenv
 from huggingface_hub import upload_file
+from dataclasses import dataclass
+from datetime import datetime
 
 load_dotenv()
-
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -23,12 +24,17 @@ GPU_VRAM_MAPPING = {
 VRAM_TO_GPU_MAPPING = dict(
     sorted({vram: gpu for gpu, vram in GPU_VRAM_MAPPING.items()}.items())
 )
-DOCKER_IMAGE_URL = "ghcr.io/astral-sh/uv:debian"
-
 LOCAL_CODE_DIR = Path("execution")
 LOCAL_CODE_DIR.mkdir(parents=True, exist_ok=True)
 
-pattern = r"ID:\s*([a-zA-Z0-9]+)\s*View at:\s*(https://huggingface\.co/jobs/[^/]+/\1)"
+
+@dataclass
+class ExecuteCustomCodeConfig:
+    docker_image: str = "ghcr.io/astral-sh/uv:debian"
+    pattern: str = (
+        r"ID:\s*([a-zA-Z0-9]+)\s*View at:\s*(https://huggingface\.co/jobs/[^/]+/\1)"
+    )
+    model_vram_dataset_id = "model-metadata/model_vram_code"
 
 
 def select_appropriate_gpu(vram_required: float, execution_urls, model_id):
@@ -56,7 +62,23 @@ def select_appropriate_gpu(vram_required: float, execution_urls, model_id):
 
 
 if __name__ == "__main__":
-    ds = load_dataset("model-metadata/model_vram_code", split="train")
+    client = WebClient(token=os.environ["SLACK_TOKEN"])
+    channel_name = "#exp-slack-alerts"
+    config = ExecuteCustomCodeConfig()
+
+    ds = load_dataset(config.model_vram_dataset_id, split="train")
+
+    slack_message_report = {
+        "models_with_no_safetensors": [],
+        "models_with_greater_vram": [],
+        "models_with_no_code_found": [],
+    }
+    models_executed_with_urls = {
+        "model_id": [],
+        "index": [],
+        "job_url": [],
+        "job_id": [],
+    }
 
     for sample in ds:
         model_id = sample["model_id"]
@@ -64,17 +86,25 @@ if __name__ == "__main__":
         script_urls = sample["code_urls"]
         execution_urls = sample["execution_urls"]
 
+        if estimated_vram == 0.0:
+            # There were no safetensors or a problem to estimate the VRAM
+            slack_message_report["models_with_no_safetensors"].append(model_id)
+            continue
+
         selected_gpu = select_appropriate_gpu(estimated_vram, execution_urls, model_id)
-        if selected_gpu is None:  # no gpus were found to run
+        if selected_gpu is None:
+            # No gpus were found to run
+            slack_message_report["models_with_greater_vram"].append(model_id)
             continue
 
         for idx, script_url in enumerate(script_urls):
             if "DO NOT EXECUTE" in script_url:
+                slack_message_report["models_with_no_code_found"].append(model_id)
                 logger.info(f"Skipping Execution {model_id}, no code found")
-                continue
+                break
 
             launch_command = (
-                f"hfjobs run --detach --secret HF_TOKEN={os.getenv('HF_TOKEN')} --flavor {selected_gpu} {DOCKER_IMAGE_URL} /bin/bash -c "
+                f"hfjobs run --detach --secret HF_TOKEN={os.getenv('HF_TOKEN')} --flavor {selected_gpu} {config.docker_image} /bin/bash -c "
                 f'"export HOME=/tmp && export USER=dummy && uv run {script_url}"'
             )
 
@@ -99,12 +129,124 @@ if __name__ == "__main__":
                         f"Failed to launch job for {model_id}, exit code: {exit_code}"
                     )
 
-                match = re.search(pattern, stdout)
+                match = re.search(config.pattern, stdout)
 
                 if match:
                     job_id = match.group(1)
                     job_url = match.group(2)
+
+                    models_executed_with_urls["model_id"].append(model_id)
+                    models_executed_with_urls["index"].append(idx)
+                    models_executed_with_urls["job_id"].append(job_id)
+                    models_executed_with_urls["job_url"].append(job_url)
+
                     logger.info(f"{job_url} for {model_id} {idx}")
 
             except Exception as e:
                 logger.error(f"Error launching job for {model_id}: {e}")
+
+    # 5: Send the updates to slack
+    today = datetime.now().strftime("%Y-%m-%d")
+    client.chat_postMessage(
+        channel=channel_name,
+        blocks=[
+            {
+                "type": "header",
+                "text": {
+                    "type": "plain_text",
+                    "text": f"HF Jobs Run Report for {today}",
+                    "emoji": False,
+                },
+            },
+        ],
+    )
+
+    for issue_type, models in slack_message_report.items():
+        blocks = [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*{' '.join(issue_type.split('_'))}*",
+                },
+            },
+        ]
+
+        text = ""
+        for model in models:
+            model_id = model
+            # Check for the slack restriction
+            if len(text + f"* <https://huggingface.co/{model_id}|{model_id}>\n") > 2900:
+                blocks.append(
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": text,
+                        },
+                    }
+                )
+                text = f"* <https://huggingface.co/{model_id}|{model_id}>\n"
+            else:
+                text += f"* <https://huggingface.co/{model_id}|{model_id}>\n"
+
+        blocks.append(
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": text,
+                },
+            }
+        )
+
+        response = client.chat_postMessage(channel=channel_name, blocks=blocks)
+
+    blocks = [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "*Executed Jobs* ✅",
+            },
+        },
+    ]
+    text = ""
+    num_model_ids_executed = len(models_executed_with_urls["model_id"])
+    for idx in range(num_model_ids_executed):
+        model_id = models_executed_with_urls["model_id"][idx]
+        job_id = models_executed_with_urls["job_id"][idx]
+        job_url = models_executed_with_urls["job_url"][idx]
+        index = models_executed_with_urls["index"][idx]
+        # Check for the slack restriction
+        if (
+            len(
+                text
+                + f"* <https://huggingface.co/{model_id}|{model_id}> ➡️ <{job_url}|Job Url>\n"
+            )
+            > 2900
+        ):
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": text,
+                    },
+                }
+            )
+            text = f"* <https://huggingface.co/{model_id}|{model_id}> ➡️ <{job_url}|Job Url>\n"
+        else:
+            text += f"* <https://huggingface.co/{model_id}|{model_id}> ➡️ <{job_url}|Job Url>\n"
+
+    blocks.append(
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": text,
+            },
+        }
+    )
+
+    response = client.chat_postMessage(channel=channel_name, blocks=blocks)
