@@ -26,7 +26,7 @@ class CustomCodeCheckerConfig:
     custom_code_execution_files_dataset_id: str = (
         "model-metadata/custom_code_execution_files"
     )
-    model_vram_dataset_id = "model-metadata/model_vram_code"
+    model_vram_code_dataset_id = "model-metadata/model_vram_code"
 
 
 # Directory for storing generated code locally
@@ -221,4 +221,4 @@ if __name__ == "__main__":
         for key in dataset_records:
             dataset_records[key].append(result[key])
 
-    Dataset.from_dict(dataset_records).push_to_hub(config.model_vram_dataset_id)
+    Dataset.from_dict(dataset_records).push_to_hub(config.model_vram_code_dataset_id)

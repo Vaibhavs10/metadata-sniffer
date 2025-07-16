@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from huggingface_hub import upload_file
 from dataclasses import dataclass
 from datetime import datetime
+from datasets import Dataset
 
 load_dotenv()
 
@@ -34,7 +35,9 @@ class ExecuteCustomCodeConfig:
     pattern: str = (
         r"ID:\s*([a-zA-Z0-9]+)\s*View at:\s*(https://huggingface\.co/jobs/[^/]+/\1)"
     )
-    model_vram_dataset_id = "model-metadata/model_vram_code"
+    model_vram_code_dataset_id = "model-metadata/model_vram_code"
+    channel_name = "#exp-slack-alerts"
+    models_executed_with_urls_dataset_id = "model-metadata/models_executed_urls"
 
 
 def select_appropriate_gpu(vram_required: float, execution_urls, model_id):
@@ -63,10 +66,9 @@ def select_appropriate_gpu(vram_required: float, execution_urls, model_id):
 
 if __name__ == "__main__":
     client = WebClient(token=os.environ["SLACK_TOKEN"])
-    channel_name = "#exp-slack-alerts"
     config = ExecuteCustomCodeConfig()
 
-    ds = load_dataset(config.model_vram_dataset_id, split="train")
+    ds = load_dataset(config.model_vram_code_dataset_id, split="train")
 
     slack_message_report = {
         "models_with_no_safetensors": [],
@@ -78,6 +80,7 @@ if __name__ == "__main__":
         "index": [],
         "job_url": [],
         "job_id": [],
+        "execution_url": [],
     }
 
     for sample in ds:
@@ -139,6 +142,9 @@ if __name__ == "__main__":
                     models_executed_with_urls["index"].append(idx)
                     models_executed_with_urls["job_id"].append(job_id)
                     models_executed_with_urls["job_url"].append(job_url)
+                    models_executed_with_urls["execution_url"].append(
+                        execution_urls[idx]
+                    )
 
                     logger.info(f"{job_url} for {model_id} {idx}")
 
@@ -148,13 +154,13 @@ if __name__ == "__main__":
     # 5: Send the updates to slack
     today = datetime.now().strftime("%Y-%m-%d")
     client.chat_postMessage(
-        channel=channel_name,
+        channel=config.channel_name,
         blocks=[
             {
                 "type": "header",
                 "text": {
                     "type": "plain_text",
-                    "text": f"HF Jobs Run Report for {today}",
+                    "text": f"Custom Code Report for {today}",
                     "emoji": False,
                 },
             },
@@ -200,53 +206,22 @@ if __name__ == "__main__":
             }
         )
 
-        response = client.chat_postMessage(channel=channel_name, blocks=blocks)
+        response = client.chat_postMessage(channel=config.channel_name, blocks=blocks)
 
-    blocks = [
-        {
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": "*Executed Jobs* ✅",
-            },
-        },
-    ]
-    text = ""
-    num_model_ids_executed = len(models_executed_with_urls["model_id"])
-    for idx in range(num_model_ids_executed):
-        model_id = models_executed_with_urls["model_id"][idx]
-        job_id = models_executed_with_urls["job_id"][idx]
-        job_url = models_executed_with_urls["job_url"][idx]
-        index = models_executed_with_urls["index"][idx]
-        # Check for the slack restriction
-        if (
-            len(
-                text
-                + f"* <https://huggingface.co/{model_id}|{model_id}> ➡️ <{job_url}|Job Url>\n"
-            )
-            > 2900
-        ):
-            blocks.append(
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": text,
-                    },
-                }
-            )
-            text = f"* <https://huggingface.co/{model_id}|{model_id}> ➡️ <{job_url}|Job Url>\n"
-        else:
-            text += f"* <https://huggingface.co/{model_id}|{model_id}> ➡️ <{job_url}|Job Url>\n"
-
-    blocks.append(
-        {
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": text,
-            },
-        }
+    # Upload the executed models information
+    Dataset.from_dict(models_executed_with_urls).push_to_hub(
+        config.models_executed_with_urls_dataset_id
     )
 
-    response = client.chat_postMessage(channel=channel_name, blocks=blocks)
+    client.chat_postMessage(
+        channel=config.channel_name,
+        blocks=[
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "HF Jobs Running ...",
+                },
+            },
+        ],
+    )

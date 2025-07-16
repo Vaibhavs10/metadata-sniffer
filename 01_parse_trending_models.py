@@ -41,9 +41,9 @@ class ModelCheckerConfig:
             "nielsr",
         ]
     )
-
-    num_trending_models: int = 100  # number of trending models to process
+    num_trending_models: int = 100
     models_with_custom_code_dataset_id = "model-metadata/models_with_custom_code"
+    channel_name = "#exp-slack-alerts"
 
 
 @dataclass
@@ -95,7 +95,7 @@ def analyze_model_metadata(
     # Check if any Avocado team member has participated in discussions
     discussions_with_avocado = []
     for discussion in discussions:
-        if discussion.author in model_checker_config.avocado_team_members:
+        if discussion.author in config.avocado_team_members:
             discussions_with_avocado.append(
                 AvocadoDiscussion(
                     title=discussion.title,
@@ -122,14 +122,13 @@ def analyze_model_metadata(
 
 if __name__ == "__main__":
     # Configuration
-    model_checker_config = ModelCheckerConfig()
+    config = ModelCheckerConfig()
     huggingface_api = HfApi()
     client = WebClient(token=os.environ["SLACK_TOKEN"])
-    channel_name = "#exp-slack-alerts"
 
     # 1: Fetch the top N trending models
     trending_models = huggingface_api.list_models(
-        sort="trendingScore", limit=model_checker_config.num_trending_models
+        sort="trendingScore", limit=config.num_trending_models
     )
 
     # 2: Process model metadata
@@ -150,7 +149,7 @@ if __name__ == "__main__":
             except Exception as e:
                 logger.error(f"Error processing model {model_info.id}: {e}")
 
-    # 3: Categorize the models based on the problems
+    # 3: Categorize the models based on the issues
     models_by_issue_type = {issue.value: [] for issue in MetadataIssues}
 
     for metadata_result in metadata_results:
@@ -166,13 +165,13 @@ if __name__ == "__main__":
     ]:
         custom_code_dataset["custom_code"].append(model_metadata_result.id)
     Dataset.from_dict(custom_code_dataset).push_to_hub(
-        model_checker_config.models_with_custom_code_dataset_id
+        config.models_with_custom_code_dataset_id
     )
 
     # 5: Send the updates to slack
     today = datetime.now().strftime("%Y-%m-%d")
     client.chat_postMessage(
-        channel=channel_name,
+        channel=config.channel_name,
         blocks=[
             {"type": "divider"},
             {
@@ -229,4 +228,4 @@ if __name__ == "__main__":
             }
         )
 
-        response = client.chat_postMessage(channel=channel_name, blocks=blocks)
+        response = client.chat_postMessage(channel=config.channel_name, blocks=blocks)
