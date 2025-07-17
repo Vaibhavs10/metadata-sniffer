@@ -1,49 +1,19 @@
-from dataclasses import dataclass, field
-from typing import List
-from huggingface_hub import HfApi, ModelInfo
-import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from enum import Enum
-from datasets import Dataset
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
+
+from datasets import Dataset
+from dotenv import load_dotenv
+from huggingface_hub import HfApi, ModelInfo
 from slack_sdk import WebClient
 
-from pathlib import Path
-from dotenv import load_dotenv
+from configuration import DatasetConfig, ModelCheckerConfig, SlackConfig
+from utilities import SlackMessage, SlackMessageType, send_slack_message, setup_logging
 
-logging.getLogger().setLevel(logging.DEBUG)
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
-
-
-env_path = Path(".") / ".env"
-load_dotenv(dotenv_path=env_path)
-
-
-# Dataclasses
-@dataclass
-class ModelCheckerConfig:
-    avocado_team_members: List[str] = field(
-        default_factory=lambda: [
-            "ariG23498",
-            "reach-vb",
-            "pcuenq",
-            "burtenshaw",
-            "dylanebert",
-            "davanstrien",
-            "merve",
-            "sergiopaniego",
-            "Steveeeeeeen",
-            "ThomasSimonini",
-            "nielsr",
-        ]
-    )
-    num_trending_models: int = 100
-    models_with_custom_code_dataset_id = "model-metadata/models_with_custom_code"
-    channel_name = "#exp-slack-alerts"
+load_dotenv()
+logger = setup_logging(__name__)
 
 
 @dataclass
@@ -122,6 +92,8 @@ def analyze_model_metadata(
 
 if __name__ == "__main__":
     # Configuration
+    ds_config = DatasetConfig()
+    slack_config = SlackConfig()
     config = ModelCheckerConfig()
     huggingface_api = HfApi()
     client = WebClient(token=os.environ["SLACK_TOKEN"])
@@ -165,35 +137,30 @@ if __name__ == "__main__":
     ]:
         custom_code_dataset["custom_code"].append(model_metadata_result.id)
     Dataset.from_dict(custom_code_dataset).push_to_hub(
-        config.models_with_custom_code_dataset_id
+        ds_config.models_with_custom_code_dataset_id
     )
 
     # 5: Send the updates to slack
     today = datetime.now().strftime("%Y-%m-%d")
-    client.chat_postMessage(
-        channel=config.channel_name,
-        blocks=[
-            {"type": "divider"},
-            {
-                "type": "header",
-                "text": {
-                    "type": "plain_text",
-                    "text": f"Meta Data Report for {today}",
-                    "emoji": False,
-                },
-            },
-        ],
+    messages = [
+        SlackMessage(msg_type=SlackMessageType.DIVIDER),
+        SlackMessage(
+            text=f"Meta Data Report for {today}",
+            msg_type=SlackMessageType.HEADER,
+        ),
+    ]
+    send_slack_message(
+        client=client, channel_name=slack_config.channel_name, messages=messages
     )
 
     for issue_type, models in models_by_issue_type.items():
-        blocks = [
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"*{' '.join(issue_type.split('_'))}*",
-                },
-            },
+        messages = [
+            (
+                SlackMessage(
+                    text=f"*{' '.join(issue_type.split('_'))}*",
+                    msg_type=SlackMessageType.SECTION,
+                )
+            )
         ]
 
         text = ""
@@ -205,27 +172,15 @@ if __name__ == "__main__":
                     len(text + f"* <https://huggingface.co/{model_id}|{model_id}>\n")
                     > 2900
                 ):
-                    blocks.append(
-                        {
-                            "type": "section",
-                            "text": {
-                                "type": "mrkdwn",
-                                "text": text,
-                            },
-                        }
+                    messages.append(
+                        SlackMessage(text=text, msg_type=SlackMessageType.SECTION)
                     )
                     text = f"* <https://huggingface.co/{model_id}|{model_id}>\n"
                 else:
                     text += f"* <https://huggingface.co/{model_id}|{model_id}>\n"
 
-        blocks.append(
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": text,
-                },
-            }
-        )
+        messages.append(SlackMessage(text=text, msg_type=SlackMessageType.SECTION))
 
-        response = client.chat_postMessage(channel=config.channel_name, blocks=blocks)
+        send_slack_message(
+            client=client, channel_name=slack_config.channel_name, messages=messages
+        )

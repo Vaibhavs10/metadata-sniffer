@@ -1,22 +1,19 @@
-import logging
 import os
 import re
 import subprocess
+from datetime import datetime
 from pathlib import Path
-from slack_sdk import WebClient
-from datasets import load_dataset
+
+from datasets import Dataset, load_dataset
 from dotenv import load_dotenv
 from huggingface_hub import upload_file
-from dataclasses import dataclass
-from datetime import datetime
-from datasets import Dataset
+from slack_sdk import WebClient
+
+from configuration import DatasetConfig, ExecuteCustomCodeConfig, SlackConfig
+from utilities import SlackMessage, SlackMessageType, send_slack_message, setup_logging
 
 load_dotenv()
-
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+logger = setup_logging(__name__)
 
 GPU_VRAM_MAPPING = {
     "l4x1": 30,
@@ -27,17 +24,6 @@ VRAM_TO_GPU_MAPPING = dict(
 )
 LOCAL_CODE_DIR = Path("execution")
 LOCAL_CODE_DIR.mkdir(parents=True, exist_ok=True)
-
-
-@dataclass
-class ExecuteCustomCodeConfig:
-    docker_image: str = "ghcr.io/astral-sh/uv:debian"
-    pattern: str = (
-        r"ID:\s*([a-zA-Z0-9]+)\s*View at:\s*(https://huggingface\.co/jobs/[^/]+/\1)"
-    )
-    model_vram_code_dataset_id = "model-metadata/model_vram_code"
-    channel_name = "#exp-slack-alerts"
-    models_executed_with_urls_dataset_id = "model-metadata/models_executed_urls"
 
 
 def select_appropriate_gpu(vram_required: float, execution_urls, model_id):
@@ -67,8 +53,10 @@ def select_appropriate_gpu(vram_required: float, execution_urls, model_id):
 if __name__ == "__main__":
     client = WebClient(token=os.environ["SLACK_TOKEN"])
     config = ExecuteCustomCodeConfig()
+    ds_config = DatasetConfig()
+    slack_config = SlackConfig()
 
-    ds = load_dataset(config.model_vram_code_dataset_id, split="train")
+    ds = load_dataset(ds_config.model_vram_code_dataset_id, split="train")
 
     slack_message_report = {
         "models_with_no_safetensors": [],
@@ -153,29 +141,21 @@ if __name__ == "__main__":
 
     # 5: Send the updates to slack
     today = datetime.now().strftime("%Y-%m-%d")
-    client.chat_postMessage(
-        channel=config.channel_name,
-        blocks=[
-            {
-                "type": "header",
-                "text": {
-                    "type": "plain_text",
-                    "text": f"Custom Code Report for {today}",
-                    "emoji": False,
-                },
-            },
-        ],
+    messages = [
+        SlackMessage(
+            text=f"Custom Code Report for {today}", msg_type=SlackMessageType.HEADER
+        )
+    ]
+    send_slack_message(
+        client=client, channel_name=slack_config.channel_name, messages=messages
     )
 
     for issue_type, models in slack_message_report.items():
-        blocks = [
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"*{' '.join(issue_type.split('_'))}*",
-                },
-            },
+        messages = [
+            SlackMessage(
+                text=f"*{' '.join(issue_type.split('_'))}*",
+                msg_type=SlackMessageType.SECTION,
+            )
         ]
 
         text = ""
@@ -183,45 +163,20 @@ if __name__ == "__main__":
             model_id = model
             # Check for the slack restriction
             if len(text + f"* <https://huggingface.co/{model_id}|{model_id}>\n") > 2900:
-                blocks.append(
-                    {
-                        "type": "section",
-                        "text": {
-                            "type": "mrkdwn",
-                            "text": text,
-                        },
-                    }
+                messages.append(
+                    SlackMessage(text=text, msg_type=SlackMessageType.SECTION)
                 )
                 text = f"* <https://huggingface.co/{model_id}|{model_id}>\n"
             else:
                 text += f"* <https://huggingface.co/{model_id}|{model_id}>\n"
 
-        blocks.append(
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": text,
-                },
-            }
-        )
+        messages.append(SlackMessage(text=text, msg_type=SlackMessageType.SECTION))
 
-        response = client.chat_postMessage(channel=config.channel_name, blocks=blocks)
+        send_slack_message(
+            client=client, channel_name=slack_config.channel_name, messages=messages
+        )
 
     # Upload the executed models information
     Dataset.from_dict(models_executed_with_urls).push_to_hub(
-        config.models_executed_with_urls_dataset_id
-    )
-
-    client.chat_postMessage(
-        channel=config.channel_name,
-        blocks=[
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": "HF Jobs Running ...",
-                },
-            },
-        ],
+        ds_config.models_executed_with_urls_dataset_id
     )

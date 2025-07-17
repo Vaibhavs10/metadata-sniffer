@@ -23,17 +23,19 @@ jobs:
 
     - name: Step 1 - Parse Trending Models
       env:
-        EXP_SLACK_WEBHOOK_URL: ${{ secrets.EXP_SLACK_WEBHOOK_URL }}
+        SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
       run: python 01_parse_trending_models.py
 
     - name: Step 2 - Process Models with Custom Code
       env:
+        SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
       run: python 02_process_models_with_custom_code.py
 
     - name: Step 3 - Execute HF Jobs
       env:
+        SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
       run: python 03_execute_hf_jobs.py
 
@@ -43,6 +45,6 @@ jobs:
 
     - name: Step 4 - Summarize Custom Code
       env:
-        EXP_SLACK_WEBHOOK_URL: ${{ secrets.EXP_SLACK_WEBHOOK_URL }}
+        SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
       run: python 04_summarise_custom_code.py

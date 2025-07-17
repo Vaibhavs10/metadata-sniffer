@@ -1,32 +1,17 @@
 import json
-import logging
 from pathlib import Path
-from dataclasses import dataclass
-from typing import List, Dict
+from typing import Dict, List
+
 import requests
-from huggingface_hub import HfApi
 from datasets import Dataset, load_dataset
 from dotenv import load_dotenv
-from huggingface_hub import upload_file
+from huggingface_hub import HfApi, upload_file
 
-# Load environment variables
+from configuration import DatasetConfig
+from utilities import setup_logging
+
 load_dotenv()
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
-
-
-@dataclass
-class CustomCodeCheckerConfig:
-    models_with_custom_code_dataset_id: str = "model-metadata/models_with_custom_code"
-    custom_code_py_files_dataset_id: str = "model-metadata/custom_code_py_files"
-    custom_code_execution_files_dataset_id: str = (
-        "model-metadata/custom_code_execution_files"
-    )
-    model_vram_code_dataset_id = "model-metadata/model_vram_code"
+logger = setup_logging(__name__)
 
 
 # Directory for storing generated code locally
@@ -127,9 +112,7 @@ def get_hf_dataset_url(dataset_id: str, filename: str) -> str:
     return f"https://huggingface.co/datasets/{dataset_id}/raw/main/{filename}"
 
 
-def process_notebook_to_scripts(
-    model_id: str, config: CustomCodeCheckerConfig
-) -> List[str]:
+def process_notebook_to_scripts(model_id: str, config: DatasetConfig) -> List[str]:
     notebook = fetch_notebook_content(model_id)
     if not notebook:
         return []
@@ -152,7 +135,7 @@ def process_notebook_to_scripts(
     return processed_scripts
 
 
-def process_model_entry(model_id: str, config: CustomCodeCheckerConfig, hf_api) -> Dict:
+def process_model_entry(model_id: str, config: DatasetConfig, hf_api) -> Dict:
     model_name = sanitize_model_name(model_id)
     vram = estimate_model_vram(model_id, hf_api)
     scripts = process_notebook_to_scripts(model_id, config)
@@ -202,10 +185,10 @@ def process_model_entry(model_id: str, config: CustomCodeCheckerConfig, hf_api) 
 
 if __name__ == "__main__":
     hf_api = HfApi()
-    config = CustomCodeCheckerConfig()
+    ds_config = DatasetConfig()
 
     target_model_ids = load_dataset(
-        config.models_with_custom_code_dataset_id, split="train"
+        ds_config.models_with_custom_code_dataset_id, split="train"
     )["custom_code"]
 
     dataset_records = {
@@ -217,8 +200,8 @@ if __name__ == "__main__":
     }
 
     for model_id in target_model_ids:
-        result = process_model_entry(model_id, config, hf_api)
+        result = process_model_entry(model_id, ds_config, hf_api)
         for key in dataset_records:
             dataset_records[key].append(result[key])
 
-    Dataset.from_dict(dataset_records).push_to_hub(config.model_vram_code_dataset_id)
+    Dataset.from_dict(dataset_records).push_to_hub(ds_config.model_vram_code_dataset_id)
