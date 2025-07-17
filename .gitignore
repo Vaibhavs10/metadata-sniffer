@@ -1,4 +1,7 @@
 .env
 .venv
 trending_data
+custom_code
+execution
 .ruff_cache
+__pycache__
