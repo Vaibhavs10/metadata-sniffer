@@ -23,8 +23,11 @@ UV_SCRIPT_HEADER = """\
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
-#     "transformers",
 #     "torch",
+#     "torchvision",
+#     "transformers",
+#     "accelerate",
+#     "peft",
 # ]
 # ///
 """
