@@ -4,8 +4,7 @@ from typing import List
 
 @dataclass
 class SlackConfig:
-    # channel_name = "#hub-model-metadata-snippets-sprint"
-    channel_name = "#exp-slack-alerts"
+    channel_name = "#hub-model-metadata-snippets-sprint"
 
 
 @dataclass
@@ -19,8 +18,6 @@ class DatasetConfig:
 
     # Dataset that holds urls for HF Jobs
     hf_jobs_url_dataset_id = "model-metadata/hf_jobs_url"
-
-    models_executed_with_urls_dataset_id = "model-metadata/models_executed_urls"
 
 
 @dataclass
@@ -45,8 +42,5 @@ class ModelCheckerConfig:
 
 
 @dataclass
-class ExecuteCustomCodeConfig:
+class ExecuteCodeConfig:
     docker_image: str = "ghcr.io/astral-sh/uv:debian"
-    pattern: str = (
-        r"ID:\s*([a-zA-Z0-9]+)\s*View at:\s*(https://huggingface\.co/jobs/[^/]+/\1)"
-    )

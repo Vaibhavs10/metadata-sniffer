@@ -10,8 +10,7 @@ from huggingface_hub import HfApi, upload_file
 from slack_sdk import WebClient
 
 from configuration import SlackConfig, DatasetConfig
-from utilities import setup_logging
-from utilities import SlackMessage, SlackMessageType, send_slack_message, setup_logging
+from utilities import send_slack_message, setup_logging
 
 load_dotenv()
 logger = setup_logging(__name__)
@@ -29,8 +28,11 @@ UV_SCRIPT_HEADER = """\
 #     "torch",
 #     "torchvision",
 #     "transformers",
+#     "diffusers",
+#     "sentence-transformers",
 #     "accelerate",
 #     "peft",
+#     "slack-sdk",
 # ]
 # ///
 """
@@ -88,42 +90,25 @@ def extract_code_cells(notebook: dict) -> List[str]:
         if cell.get("cell_type") != "code":
             continue
         cell_content = "".join(cell.get("source", [])).strip()
-        if cell_content.startswith("#"):
+        if (
+            "pip install" in cell_content
+            or "integration status" in cell_content
+            or "import os" in cell_content
+        ):
+            logger.warning(
+                f"`pip install`, `integration status unknown`, or `inference endpoints` so skipping"
+            )
+        else:
             code_snippets.append(cell_content)
     return code_snippets
 
 
-# def wrap_code_snippet_for_execution(
-#     code_content: str,
-#     model_name: str,
-#     snippet_index: int,
-#     execution_dataset_id: str,
-# ) -> str:
-#     exec_file = f"{model_name}_{snippet_index}.txt"
-#     lines = ["try:"]
-#     lines += [f"    {line}" for line in code_content.splitlines()]
-#     lines += [
-#         f"    with open('{exec_file}', 'w') as f:",
-#         f"        f.write('Everything was good in {exec_file}')",
-#         "except Exception as e:",
-#         f"    with open('{exec_file}', 'w') as f:",
-#         "        import traceback",
-#         "        traceback.print_exc(file=f)",
-#         "finally:",
-#         "    from huggingface_hub import upload_file",
-#         "    upload_file(",
-#         f"        path_or_fileobj='{exec_file}',",
-#         f"        repo_id='{execution_dataset_id}',",
-#         f"        path_in_repo='{exec_file}',",
-#         "        repo_type='dataset',",
-#         "    )",
-#     ]
-#     return "\n".join(lines), exec_file
 def wrap_code_snippet_for_execution(
     code_content: str,
     model_name: str,
     snippet_index: int,
     execution_dataset_id: str,
+    channel_name: str,
 ) -> tuple[str, str]:
     """
     Wraps the provided code content in a safe try/except/finally block
@@ -141,9 +126,19 @@ try:
     with open('{exec_file}', 'w', encoding='utf-8') as f:
         f.write('Everything was good in {exec_file}')
 except Exception as e:
-    with open('{exec_file}', 'w', encoding='utf-8') as f:
+    import os
+    from slack_sdk import WebClient
+    client = WebClient(token=os.environ['SLACK_TOKEN'])
+    client.chat_postMessage(
+        channel='{channel_name}',
+        text='Problem in <https://huggingface.co/datasets/{execution_dataset_id}/blob/main/{exec_file}|{exec_file}>',
+    )
+
+    with open('{exec_file}', 'a', encoding='utf-8') as f:
         import traceback
+        f.write('''```CODE: \n{code_content}\n```\n\nERROR: \n''')
         traceback.print_exc(file=f)
+    
 finally:
     from huggingface_hub import upload_file
     upload_file(
@@ -163,6 +158,8 @@ finally:
         indented_code=indented_code,
         exec_file=exec_file,
         execution_dataset_id=execution_dataset_id,
+        channel_name=channel_name,
+        code_content=code_content,
     )
 
     return wrapped_code, exec_file
@@ -177,7 +174,10 @@ def get_hf_dataset_url(dataset_id: str, filename: str) -> str:
 
 
 def process_notebook_to_scripts(
-    model_name: str, model_id: str, ds_config: DatasetConfig
+    model_name: str,
+    model_id: str,
+    ds_config: DatasetConfig,
+    channel_name: str,
 ) -> List[str]:
     notebook = fetch_notebook_content(model_id)
     if not notebook:
@@ -199,6 +199,7 @@ def process_notebook_to_scripts(
             model_name=model_name,
             snippet_index=idx,
             execution_dataset_id=ds_config.code_execution_files_dataset_id,
+            channel_name=channel_name,
         )
         processed_scripts.append(UV_SCRIPT_HEADER + "\n" + wrapped_code)
         exec_files.append(exec_file)
@@ -217,7 +218,10 @@ def process_models(
         model_id=model_id, huggingface_api=huggingface_api
     )  # get the estimated vram later used for deciding the machines to run the models on
     processed_scripts, exec_files = process_notebook_to_scripts(
-        model_name=model_name, model_id=model_id, ds_config=ds_config
+        model_name=model_name,
+        model_id=model_id,
+        ds_config=ds_config,
+        channel_name=slack_config.channel_name,
     )
 
     code_urls = []
