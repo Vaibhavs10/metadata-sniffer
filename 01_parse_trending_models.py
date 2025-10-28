@@ -1,7 +1,6 @@
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, asdict
-from datetime import datetime
 from enum import Enum
 from typing import List, Dict
 
@@ -12,6 +11,7 @@ from slack_sdk import WebClient
 
 from configuration import ModelCheckerConfig, SlackConfig, DatasetConfig
 from utilities import SlackMessage, SlackMessageType, send_slack_message, setup_logging
+from datetime import datetime, timezone
 
 load_dotenv()
 logger = setup_logging(__name__)
@@ -32,6 +32,8 @@ class AvocadoDiscussion:
     title: str
     author: str
     url: str
+    status: str
+    created_at: datetime
 
 
 class MetadataIssues(Enum):
@@ -41,9 +43,16 @@ class MetadataIssues(Enum):
     WITH_GGUF = "with_gguf"
 
 
-def _model_link_line(model_id: str) -> str:
-    return f"* <https://huggingface.co/{model_id}|{model_id}>\n"
+def _model_link_line(model_dict: dict) -> str:
+    model_id = model_dict["model_id"]
+    pr = model_dict["pr"]
 
+    if pr == "not yet":
+        return f"* <https://huggingface.co/{model_id}|{model_id}>\n"
+    else:
+        days_passed = model_dict["days_passed"]
+        return f"* <https://huggingface.co/{model_id}|{model_id}> | <{pr}|pending pr> for {days_passed} days 🔴\n"
+        
 
 def _chunk_markdown(text_lines: List[str], max_len: int = 2900) -> List[str]:
     """Split lines into chunks under Slack section hard-limit."""
@@ -92,6 +101,8 @@ def analyze_model_metadata(
             discussions_with_avocado.append(
                 AvocadoDiscussion(
                     title=discussion.title,
+                    status=discussion.status,
+                    created_at=discussion.created_at,
                     author=discussion.author,
                     url=f"https://huggingface.co/{model_id}/discussions/{discussion.num}",
                 )
@@ -152,6 +163,7 @@ if __name__ == "__main__":
 
     # 4: Send the updates to Slack
     today = datetime.now().strftime("%Y-%m-%d")
+    now = datetime.now(timezone.utc)
     messages = [
         SlackMessage(msg_type=SlackMessageType.DIVIDER),
         SlackMessage(
@@ -173,11 +185,23 @@ if __name__ == "__main__":
         )
 
         # Keep your original filtering semantics
-        filtered_ids = [
-            m["id"]
-            for m in models
-            if not m["should_skip"] and not m["discussions_with_avocado_participation"]
-        ]
+        filtered_ids = list()
+        for model in models:
+            model_id = model["id"]
+            avocado_discussions = model["discussions_with_avocado_participation"]
+            should_skip = model["should_skip"]
+            if not should_skip:
+                if not avocado_discussions:
+                    filtered_ids.append({"model_id": model_id, "pr": "not yet"})
+                    continue
+                
+                for discussion in avocado_discussions:
+                    status = discussion["status"]
+                    created_at = discussion["created_at"]
+                    days_passed = (now - created_at).days
+                    if status != "merged" and days_passed > 3:
+                        filtered_ids.append({"model_id": model_id, "pr": discussion["url"], "days_passed": days_passed})
+                        break
 
         if not filtered_ids:
             send_slack_message(
@@ -192,7 +216,7 @@ if __name__ == "__main__":
             )
             continue
 
-        lines = [_model_link_line(mid) for mid in filtered_ids]
+        lines = [_model_link_line(model_dict) for model_dict in filtered_ids]
         for chunk in _chunk_markdown(lines, max_len=2900):
             send_slack_message(
                 client=client,
