@@ -25,7 +25,9 @@ def setup_logging(name: str, level: int = logging.INFO) -> logging.Logger:
     logger = logging.getLogger(name)
     if not logger.handlers:
         handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        )
         logger.addHandler(handler)
     logger.setLevel(level)
     logger.propagate = False  # keep formatting consistent, avoid double logs via root
@@ -52,7 +54,7 @@ def format_slack_message(text: str, msg_type: SlackMessageType) -> Dict[str, Any
 def send_slack_message(
     client: WebClient,
     channel_name: str,
-    messages: List[SlackMessage],
+    messages: Optional[List[SlackMessage]] = None,
     simple_text: Optional[str] = None,
     parent_message_ts: Optional[str] = None,
 ):

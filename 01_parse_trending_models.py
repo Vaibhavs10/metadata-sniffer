@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from huggingface_hub import HfApi, ModelInfo
 from slack_sdk import WebClient
 
-from configuration import ModelCheckerConfig, SlackConfig
+from configuration import ModelCheckerConfig, SlackConfig, DatasetConfig
 from utilities import SlackMessage, SlackMessageType, send_slack_message, setup_logging
 
 load_dotenv()
@@ -20,12 +20,11 @@ logger = setup_logging(__name__)
 @dataclass
 class ModelMetadataResult:
     id: str
-    should_skip: bool = False
+    should_skip: bool = False  # only skip if GGUF or no discussion tabs
     metadata_issues: List[str] = field(default_factory=list)
     discussions_with_avocado_participation: List["AvocadoDiscussion"] = field(
         default_factory=list
     )
-    estimated_vram: float = 0.0
 
 
 @dataclass
@@ -110,6 +109,7 @@ def analyze_model_metadata(
 
 
 if __name__ == "__main__":
+    dataset_config = DatasetConfig()
     slack_config = SlackConfig()
     config = ModelCheckerConfig()
     huggingface_api = HfApi(token=os.environ["HF_TOKEN"])
@@ -202,3 +202,11 @@ if __name__ == "__main__":
                     SlackMessage(text=chunk, msg_type=SlackMessageType.SECTION),
                 ],
             )
+
+    # Push the model dataset to Hub
+    trending_models_metadata_ds.push_to_hub(dataset_config.trending_models_metadata_id)
+    send_slack_message(
+        client=client,
+        channel_name=slack_config.channel_name,
+        simple_text=f"Trending Models Dataset Uploaded to <https://huggingface.co/datasets/{dataset_config.trending_models_metadata_id}|{dataset_config.trending_models_metadata_id}>",
+    )

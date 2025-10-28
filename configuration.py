@@ -4,17 +4,22 @@ from typing import List
 
 @dataclass
 class SlackConfig:
-    channel_name = "#hub-model-metadata-snippets-sprint"
+    # channel_name = "#hub-model-metadata-snippets-sprint"
+    channel_name = "#exp-slack-alerts"
 
 
 @dataclass
 class DatasetConfig:
-    models_with_custom_code_dataset_id: str = "model-metadata/models_with_custom_code"
-    custom_code_py_files_dataset_id: str = "model-metadata/custom_code_py_files"
-    custom_code_execution_files_dataset_id: str = (
-        "model-metadata/custom_code_execution_files"
-    )
-    model_vram_code_dataset_id = "model-metadata/model_vram_code"
+    # Top N trending models of the day
+    trending_models_metadata_id: str = "model-metadata/trending_models_metadata"
+
+    # Dataset for HF JOBS (using uv)
+    code_execution_files_dataset_id: str = "model-metadata/code_execution_files"
+    code_python_files_dataset_id: str = "model-metadata/code_python_files"
+
+    # Dataset that holds urls for HF Jobs
+    hf_jobs_url_dataset_id = "model-metadata/hf_jobs_url"
+
     models_executed_with_urls_dataset_id = "model-metadata/models_executed_urls"
 
 
@@ -26,13 +31,14 @@ class ModelCheckerConfig:
             "reach-vb",
             "pcuenq",
             "burtenshaw",
-            "dylanebert",
             "davanstrien",
             "merve",
             "sergiopaniego",
             "Steveeeeeeen",
-            "ThomasSimonini",
             "nielsr",
+            "dn6",
+            "linoyts",
+            "sayakpaul",
         ]
     )
     num_trending_models: int = 100
