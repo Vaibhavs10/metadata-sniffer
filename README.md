@@ -1,6 +1,6 @@
 # Trending Respositories Investigation
 
-This repsotiory will analyse the top 100 trending models on the Hugging Face Hub.
+This repository will analyse the top 100 trending models on the Hugging Face Hub.
 The purpose of this is to check for `library name`, and the `pipeline` tag. These
 metadata is useful for repositories as we can populate code snippets with them.
 

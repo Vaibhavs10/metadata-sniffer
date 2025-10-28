@@ -1,7 +1,7 @@
 import os
 import json
 from pathlib import Path
-from typing import Dict, List
+from typing import List
 from dataclasses import dataclass, asdict
 import requests
 from datasets import Dataset, load_dataset
@@ -70,7 +70,7 @@ def estimate_model_vram(model_id: str, huggingface_api: HfApi) -> float:
 
 
 def fetch_notebook_content(model_id: str):
-    "Get the notebook contents from model id"
+    """Get the notebook contents from model id"""
     url = f"https://huggingface.co/{model_id}.ipynb"
     try:
         response = requests.get(url, timeout=30)
@@ -209,7 +209,7 @@ def process_notebook_to_scripts(
 
 
 def process_models(
-    model_id: str, ds_config: DatasetConfig, huggingface_api: HfApi
+    model_id: str, ds_config: DatasetConfig, huggingface_api: HfApi, channel_name: str,
 ) -> ModelCodeInfo:
     model_name = sanitize_model_name(
         model_id=model_id
@@ -221,7 +221,7 @@ def process_models(
         model_name=model_name,
         model_id=model_id,
         ds_config=ds_config,
-        channel_name=slack_config.channel_name,
+        channel_name=channel_name,
     )
 
     code_urls = []
@@ -287,7 +287,7 @@ if __name__ == "__main__":
     dataset_rows = list()
     for model_id in targeted_models:
         model_code_info = process_models(
-            model_id=model_id, ds_config=dataset_config, huggingface_api=huggingface_api
+            model_id=model_id, ds_config=dataset_config, huggingface_api=huggingface_api, channel_name=slack_config.channel_name
         )
         dataset_rows.append(asdict(model_code_info))
 
