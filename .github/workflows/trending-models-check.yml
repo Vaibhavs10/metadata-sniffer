@@ -27,24 +27,14 @@ jobs:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
       run: python 01_parse_trending_models.py
 
-    - name: Step 2 - Process Models with Custom Code
+    - name: Step 2 - Process Code for HF Jobs
       env:
         SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      run: python 02_process_models_with_custom_code.py
+      run: python 02_process_code.py
 
-    - name: Step 3 - Execute HF Jobs
+    - name: Step 3 - Execute code using HF Jobs
       env:
         SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      run: python 03_execute_hf_jobs.py
-
-    - name: Wait 15 minutes
-      run: sleep 900 # 15 minutes in seconds
-      if: success() # Only wait if Step 3 succeeds
-
-    - name: Step 4 - Summarize Custom Code
-      env:
-        SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}
-        HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      run: python 04_summarise_custom_code.py
+      run: python 03_run_jobs.py

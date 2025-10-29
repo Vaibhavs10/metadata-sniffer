@@ -1,7 +1,7 @@
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import List
+from typing import List, Optional, Dict, Any
 
 from slack_sdk import WebClient
 
@@ -14,74 +14,65 @@ class SlackMessageType(Enum):
 
 @dataclass
 class SlackMessage:
-    msg_type: str = SlackMessageType.SECTION
+    msg_type: SlackMessageType = SlackMessageType.SECTION  # fixed type
     text: str = "default"
 
 
-def setup_logging(name):
-    logging.getLogger().setLevel(logging.DEBUG)
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
+def setup_logging(name: str, level: int = logging.INFO) -> logging.Logger:
+    """
+    Idempotent logger setup: no duplicate handlers, no global root mutations.
+    """
     logger = logging.getLogger(name)
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        )
+        logger.addHandler(handler)
+    logger.setLevel(level)
+    logger.propagate = False  # keep formatting consistent, avoid double logs via root
     return logger
 
 
-def format_slack_message(text, msg_type):
+def format_slack_message(text: str, msg_type: SlackMessageType) -> Dict[str, Any]:
     if msg_type == SlackMessageType.HEADER:
         return {
             "type": "header",
-            "text": {
-                "type": "plain_text",
-                "text": text,
-                "emoji": False,
-            },
+            "text": {"type": "plain_text", "text": text, "emoji": False},
         }
     elif msg_type == SlackMessageType.SECTION:
         return {
             "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": text,
-            },
+            "text": {"type": "mrkdwn", "text": text},
         }
-
     elif msg_type == SlackMessageType.DIVIDER:
-        return {
-            "type": "divider",
-        }
-
+        return {"type": "divider"}
     else:
-        raise NotImplementedError("This type is not implemented")
+        raise NotImplementedError(f"Unsupported SlackMessageType: {msg_type}")
 
 
 def send_slack_message(
     client: WebClient,
     channel_name: str,
-    messages: List[SlackMessage],
-    simple_text=None,
-    parent_message_ts=None,
+    messages: Optional[List[SlackMessage]] = None,
+    simple_text: Optional[str] = None,
+    parent_message_ts: Optional[str] = None,
 ):
+    """
+    Posts either a simple text message or a set of block messages.
+    Keeps your original behavior but a bit tighter.
+    """
     if simple_text is not None:
-        response = client.chat_postMessage(
+        return client.chat_postMessage(
             channel=channel_name,
             text=simple_text,
             thread_ts=parent_message_ts,
         )
 
-    else:
-        blocks = []
-        for message in messages:
-            blocks.append(
-                format_slack_message(text=message.text, msg_type=message.msg_type)
-            )
-
-        response = client.chat_postMessage(
-            channel=channel_name,
-            blocks=blocks,
-            text="Hello",
-            thread_ts=parent_message_ts,
-        )
-
-    return response
+    blocks = [format_slack_message(text=m.text, msg_type=m.msg_type) for m in messages]
+    return client.chat_postMessage(
+        channel=channel_name,
+        blocks=blocks,
+        text="Hello",  # fallback text for notifications/search
+        thread_ts=parent_message_ts,
+    )
