@@ -28,13 +28,12 @@ def select_appropriate_gpu(estimated_vram: float, model_id: str):
 
 
 if __name__ == "__main__":
-    config = ExecuteCodeConfig()
+    execution_config = ExecuteCodeConfig()
+    docker_image = execution_config.docker_image
     datasets_config = DatasetConfig()
     slack_config = SlackConfig()
 
     hf_jobs_url_ds = load_dataset(datasets_config.hf_jobs_url_dataset_id, split="train")
-
-    docker_image = config.docker_image
 
     for row in hf_jobs_url_ds:
         selected_gpu = select_appropriate_gpu(

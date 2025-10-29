@@ -209,7 +209,10 @@ def process_notebook_to_scripts(
 
 
 def process_models(
-    model_id: str, ds_config: DatasetConfig, huggingface_api: HfApi, channel_name: str,
+    model_id: str,
+    ds_config: DatasetConfig,
+    huggingface_api: HfApi,
+    channel_name: str,
 ) -> ModelCodeInfo:
     model_name = sanitize_model_name(
         model_id=model_id
@@ -271,8 +274,8 @@ def process_models(
 
 if __name__ == "__main__":
     huggingface_api = HfApi(token=os.environ["HF_TOKEN"])
+    slack_client = WebClient(token=os.environ["SLACK_TOKEN"])
     dataset_config = DatasetConfig()
-    client = WebClient(token=os.environ["SLACK_TOKEN"])
     slack_config = SlackConfig()
 
     trending_models_metadata_ds = load_dataset(
@@ -287,14 +290,17 @@ if __name__ == "__main__":
     dataset_rows = list()
     for model_id in targeted_models:
         model_code_info = process_models(
-            model_id=model_id, ds_config=dataset_config, huggingface_api=huggingface_api, channel_name=slack_config.channel_name
+            model_id=model_id,
+            ds_config=dataset_config,
+            huggingface_api=huggingface_api,
+            channel_name=slack_config.channel_name,
         )
         dataset_rows.append(asdict(model_code_info))
 
     model_code_info_ds = Dataset.from_list(dataset_rows)
     model_code_info_ds.push_to_hub(dataset_config.hf_jobs_url_dataset_id)
     send_slack_message(
-        client=client,
+        client=slack_client,
         channel_name=slack_config.channel_name,
         simple_text=f"HF Jobs URL Dataset Uploaded to <https://huggingface.co/datasets/{dataset_config.hf_jobs_url_dataset_id}|{dataset_config.hf_jobs_url_dataset_id}>",
     )
