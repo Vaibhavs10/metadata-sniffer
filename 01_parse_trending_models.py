@@ -16,24 +16,28 @@ from datetime import datetime, timezone
 load_dotenv()
 logger = setup_logging(__name__)
 
+now = datetime.now(timezone.utc)
+today = now.strftime("%Y-%m-%d")
+
+
+@dataclass
+class OpenAvocadoDiscussion:
+    title: str
+    author: str
+    url: str
+    status: str
+    created_at: datetime
+    days_passed: int
+
 
 @dataclass
 class ModelMetadataResult:
     id: str
     should_skip: bool = False  # only skip if GGUF or no discussion tabs
     metadata_issues: List[str] = field(default_factory=list)
-    discussions_with_avocado_participation: List["AvocadoDiscussion"] = field(
+    open_discussions_with_avocado_participation: List[OpenAvocadoDiscussion] = field(
         default_factory=list
     )
-
-
-@dataclass
-class AvocadoDiscussion:
-    title: str
-    author: str
-    url: str
-    status: str
-    created_at: datetime
 
 
 class MetadataIssues(Enum):
@@ -43,16 +47,18 @@ class MetadataIssues(Enum):
     WITH_GGUF = "with_gguf"
 
 
-def _model_link_line(model_dict: dict) -> str:
-    model_id = model_dict["model_id"]
-    pr = model_dict["pr"]
+def _model_link_line(model_id) -> str:
+    return f"* <https://huggingface.co/{model_id}|{model_id}>\n"
 
-    if pr == "not yet":
-        return f"* <https://huggingface.co/{model_id}|{model_id}>\n"
-    else:
-        days_passed = model_dict["days_passed"]
-        return f"* <https://huggingface.co/{model_id}|{model_id}> | <{pr}|pending pr> for {days_passed} days 🔴\n"
-        
+
+def _discussion_link_line(model_id, discussions) -> str:
+    text = f"* {model_id}: "
+    for discussion in discussions:
+        days_passed = discussion["days_passed"]
+        text = text + f" <{discussion['url']}|{days_passed}-days-old>"
+    text = text + "\n"
+    return text
+
 
 def _chunk_markdown(text_lines: List[str], max_len: int = 2900) -> List[str]:
     """Split lines into chunks under Slack section hard-limit."""
@@ -74,18 +80,18 @@ def analyze_model_metadata(
     model_info: ModelInfo,
     avocado_team_members: List[str],
 ) -> ModelMetadataResult:
-    """Analyze metadata for a model; no globals."""
+    """Analyze metadata for a model"""
     model_id = model_info.id
     metadata_result = ModelMetadataResult(id=model_id)
 
-    # Ignore GGUFs (keep the simple rule you had)
+    # we will currently ignore GGUFs
     if "gguf" in (model_info.tags or []):
         metadata_result.should_skip = True
         metadata_result.metadata_issues.append(MetadataIssues.WITH_GGUF.value)
         logger.info(f"Skipped {model_id} : GGUF")
         return metadata_result
 
-    # Some models do not have a discussion tab
+    # some models do not have a discussion tab, we will ignore them
     try:
         discussions = list(huggingface_api.get_repo_discussions(model_id))
     except Exception:
@@ -94,20 +100,28 @@ def analyze_model_metadata(
         logger.info(f"Skipped {model_id} : No Discussion Tab")
         return metadata_result
 
-    # Check Avocado participation
-    discussions_with_avocado = []
+    # with open avocado discussions we want to do two things
+    # 1. let the team know if we have a discussion open for 3 days
+    # 2. if there are merged PRs but the model still has issues, we will still alert the team
+    open_discussions_with_avocado: List[OpenAvocadoDiscussion] = []
     for discussion in discussions:
-        if discussion.author in avocado_team_members:
-            discussions_with_avocado.append(
-                AvocadoDiscussion(
+        if (
+            discussion.author in avocado_team_members and discussion.status == "open"
+        ):  # check if one of the avocado team memeber has interacted with the model and is still open
+            days_passed = (now - discussion.created_at).days
+            open_discussions_with_avocado.append(
+                OpenAvocadoDiscussion(
                     title=discussion.title,
                     status=discussion.status,
                     created_at=discussion.created_at,
                     author=discussion.author,
                     url=f"https://huggingface.co/{model_id}/discussions/{discussion.num}",
+                    days_passed=days_passed,
                 )
             )
-    metadata_result.discussions_with_avocado_participation = discussions_with_avocado
+    metadata_result.open_discussions_with_avocado_participation = (
+        open_discussions_with_avocado
+    )
 
     # Metadata issues
     if model_info.library_name is None:
@@ -120,19 +134,20 @@ def analyze_model_metadata(
 
 
 if __name__ == "__main__":
+    # configuration
+    huggingface_api = HfApi(token=os.environ["HF_TOKEN"])
+    slack_client = WebClient(token=os.environ["SLACK_TOKEN"])
     dataset_config = DatasetConfig()
     slack_config = SlackConfig()
-    config = ModelCheckerConfig()
-    huggingface_api = HfApi(token=os.environ["HF_TOKEN"])
-    client = WebClient(token=os.environ["SLACK_TOKEN"])
+    model_checker_config = ModelCheckerConfig()
 
-    # 1: Fetch the top N trending models
+    # fetch the top N trending models
     trending_models = huggingface_api.list_models(
-        sort="trendingScore", limit=config.num_trending_models
+        sort="trendingScore", limit=model_checker_config.num_trending_models
     )
 
-    # 2: Process model metadata
-    avocado_members = list(getattr(config, "avocado_team_members", []))
+    # process model metadata
+    avocado_members = list(getattr(model_checker_config, "avocado_team_members", []))
     metadata_results: List[Dict] = []
     with ThreadPoolExecutor(max_workers=10) as executor:
         future_to_model_info = {
@@ -152,18 +167,23 @@ if __name__ == "__main__":
 
     trending_models_metadata_ds = Dataset.from_list(metadata_results)
 
-    # 3: Categorize the models by issue (single pass; readable)
+    # categorize the models by issue to be alerted to the team
+    # also collect the pending discussions
     models_by_issue_type: Dict[str, List[Dict]] = {
         issue.value: [] for issue in MetadataIssues
     }
+    models_with_open_pending_prs: List[Dict] = []
     for row in trending_models_metadata_ds:
+        open_avocado_discussions = row["open_discussions_with_avocado_participation"]
         for issue in row["metadata_issues"]:
-            if issue in models_by_issue_type:
-                models_by_issue_type[issue].append(row)
+            if open_avocado_discussions:
+                models_with_open_pending_prs.append(
+                    {"id": row["id"], "open_discussions": open_avocado_discussions}
+                )
+            else:
+                models_by_issue_type[issue].append(row["id"])
 
-    # 4: Send the updates to Slack
-    today = datetime.now().strftime("%Y-%m-%d")
-    now = datetime.now(timezone.utc)
+    # send the updates to slack
     messages = [
         SlackMessage(msg_type=SlackMessageType.DIVIDER),
         SlackMessage(
@@ -171,11 +191,12 @@ if __name__ == "__main__":
         ),
     ]
     send_slack_message(
-        client=client, channel_name=slack_config.channel_name, messages=messages
+        client=slack_client, channel_name=slack_config.channel_name, messages=messages
     )
 
+    # alert slack with the issues
     for issue_type, models in models_by_issue_type.items():
-        # Keep your original skip rule for these categories
+        # we skip the no discussion tab and gguf categories
         if issue_type in ["no_discussion_tab", "with_gguf"]:
             continue
 
@@ -184,28 +205,10 @@ if __name__ == "__main__":
             msg_type=SlackMessageType.SECTION,
         )
 
-        # Keep your original filtering semantics
-        filtered_ids = list()
-        for model in models:
-            model_id = model["id"]
-            avocado_discussions = model["discussions_with_avocado_participation"]
-            should_skip = model["should_skip"]
-            if not should_skip:
-                if not avocado_discussions:
-                    filtered_ids.append({"model_id": model_id, "pr": "not yet"})
-                    continue
-                
-                for discussion in avocado_discussions:
-                    status = discussion["status"]
-                    created_at = discussion["created_at"]
-                    days_passed = (now - created_at).days
-                    if status != "merged" and days_passed > 3:
-                        filtered_ids.append({"model_id": model_id, "pr": discussion["url"], "days_passed": days_passed})
-                        break
-
-        if not filtered_ids:
+        if not models:
+            # no issues found
             send_slack_message(
-                client=client,
+                client=slack_client,
                 channel_name=slack_config.channel_name,
                 messages=[
                     title_msg,
@@ -216,10 +219,10 @@ if __name__ == "__main__":
             )
             continue
 
-        lines = [_model_link_line(model_dict) for model_dict in filtered_ids]
+        lines = [_model_link_line(model) for model in models]
         for chunk in _chunk_markdown(lines, max_len=2900):
             send_slack_message(
-                client=client,
+                client=slack_client,
                 channel_name=slack_config.channel_name,
                 messages=[
                     title_msg,
@@ -227,10 +230,31 @@ if __name__ == "__main__":
                 ],
             )
 
+    # alert for the pending discussions
+    title_msg = SlackMessage(
+        text=f"*Pending Discussions*",
+        msg_type=SlackMessageType.SECTION,
+    )
+    lines = [
+        _discussion_link_line(
+            model_id=sample["id"], discussions=sample["open_discussions"]
+        )
+        for sample in models_with_open_pending_prs
+    ]
+    for chunk in _chunk_markdown(lines, max_len=2900):
+        send_slack_message(
+            client=slack_client,
+            channel_name=slack_config.channel_name,
+            messages=[
+                title_msg,
+                SlackMessage(text=chunk, msg_type=SlackMessageType.SECTION),
+            ],
+        )
+
     # Push the model dataset to Hub
     trending_models_metadata_ds.push_to_hub(dataset_config.trending_models_metadata_id)
     send_slack_message(
-        client=client,
+        client=slack_client,
         channel_name=slack_config.channel_name,
         simple_text=f"Trending Models Dataset Uploaded to <https://huggingface.co/datasets/{dataset_config.trending_models_metadata_id}|{dataset_config.trending_models_metadata_id}>",
     )

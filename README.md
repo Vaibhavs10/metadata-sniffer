@@ -1,34 +1,26 @@
 # Trending Respositories Investigation
 
-This repository will analyse the top 100 trending models on the Hugging Face Hub.
-The purpose of this is to check for `library name`, and the `pipeline` tag. These
-metadata is useful for repositories as we can populate code snippets with them.
+This repository will analyse the top N (N=100 at the moment) trending models on the Hugging Face Hub.
+The purpose of this is to check for `library name`, and the `pipeline` tag, which help with code snippet
+population on the model page. We want to alert the 🥑 team of any metadata issues.
 
-Some edge cases to note:
-- The repository may be gated (needs to be accessed)
-- The repository might have no discussion tab (no need to engage)
-
-We also need to run all the code for each repository to:
-- Make sure the first point of contact for users is running
-
-The artifacts generated:
-- A running dataset for all the trending models everyday
-- Models which do not have model name
-- Models which do not have pipeline tag
-- Models which were not able to run (this is taken care of by HF Jobs)
+The next goal is to execute all the code snippets from the top N models via [Hugging Face Jobs](https://huggingface.co/docs/huggingface_hub/en/guides/jobs).
+This is done on a daily basis, and the team would be alerted for any issues while execution.
 
 A nit about HF Jobs:
-- We need to run the model on the Jobs API
-- We have to create the code snippet (as a `.py` file) and host it inside a dataset
-- The Jobs API takes the `.py` file and then runs it.
+We access the code snippets from the models and upload the snippet as a `.py` file to a Hugging Face Dataset.
+This is done in order to use the script via a URL. We also use `uv` scripts to make the script runnable on its own.
 
-Ideas:
-- The python script can have a call to the slack api, so that it sends a report
-for the avocado team to view.
-- We also need to track avocado team members comments, and check whether it has completed (this is worth checking)
-- Do we need custom code tracking? Maybe useful to see (but this is just a report for transformers team to check)
 
-Some Slack Caveats:
-- Need to understand the slack restriction for characters
-- Sometimes there might be no issues (the day we all strive to see)
+Some edge cases to note:
+1. The repository might have no discussion tab (no need to engage)
+2. The repository may be gated (needs to be accessed)
 
+The artifacts generated:
+You will find a list of datasets in the `configuration.py` file. Those datasets
+are generated as artifacts when you run the repository.
+
+Slack Messages:
+1. Alert on metadata issues.
+2. Also add pending PRs from the team.
+3. Problems with the code execution.
