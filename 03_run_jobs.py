@@ -39,18 +39,19 @@ if __name__ == "__main__":
         selected_gpu = select_appropriate_gpu(
             estimated_vram=row["estimated_vram"], model_id=row["id"]
         )
-        for script_url in row["code_urls"]:
-            run_job(
-                namespace="ariG23498",
-                image=docker_image,
-                command=[
-                    "/bin/bash",
-                    "-c",
-                    f"export HOME=/tmp && export USER=dummy && uv run {script_url}",
-                ],
-                flavor=selected_gpu,
-                secrets={
-                    "HF_TOKEN": os.environ["HF_TOKEN"],
-                    "SLACK_TOKEN": os.environ["SLACK_TOKEN"],
-                },
-            )
+        if selected_gpu is not None:
+            for script_url in row["code_urls"]:
+                run_job(
+                    namespace="ariG23498",
+                    image=docker_image,
+                    command=[
+                        "/bin/bash",
+                        "-c",
+                        f"export HOME=/tmp && export USER=dummy && uv run {script_url}",
+                    ],
+                    flavor=selected_gpu,
+                    secrets={
+                        "HF_TOKEN": os.environ["HF_TOKEN"],
+                        "SLACK_TOKEN": os.environ["SLACK_TOKEN"],
+                    },
+                )
