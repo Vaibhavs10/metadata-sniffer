@@ -28,6 +28,8 @@ def select_appropriate_gpu(estimated_vram: float, model_id: str):
 
 
 if __name__ == "__main__":
+    hf_token = os.environ["HF_TOKEN"]
+    slack_token = os.environ["SLACK_TOKEN"]
     execution_config = ExecuteCodeConfig()
     docker_image = execution_config.docker_image
     datasets_config = DatasetConfig()
@@ -43,6 +45,7 @@ if __name__ == "__main__":
             for script_url in row["code_urls"]:
                 run_job(
                     namespace="ariG23498",
+                    token=hf_token,
                     image=docker_image,
                     command=[
                         "/bin/bash",
@@ -51,7 +54,7 @@ if __name__ == "__main__":
                     ],
                     flavor=selected_gpu,
                     secrets={
-                        "HF_TOKEN": os.environ["HF_TOKEN"],
-                        "SLACK_TOKEN": os.environ["SLACK_TOKEN"],
+                        "HF_TOKEN": hf_token,
+                        "SLACK_TOKEN": slack_token,
                     },
                 )
