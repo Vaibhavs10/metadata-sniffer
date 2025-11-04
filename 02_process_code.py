@@ -213,6 +213,7 @@ def process_models(
     ds_config: DatasetConfig,
     huggingface_api: HfApi,
     channel_name: str,
+    hf_token: str,
 ) -> ModelCodeInfo:
     model_name = sanitize_model_name(
         model_id=model_id
@@ -247,6 +248,7 @@ def process_models(
             path_or_fileobj=local_path,
             path_in_repo=local_py_filename,
             repo_type="dataset",
+            token=hf_token,
         )
         logger.info(f"Uploaded: {local_py_filename}")
 
@@ -273,17 +275,23 @@ def process_models(
 
 
 if __name__ == "__main__":
-    huggingface_api = HfApi(token=os.environ["HF_TOKEN"])
-    slack_client = WebClient(token=os.environ["SLACK_TOKEN"])
+    hf_token = os.environ["HF_TOKEN"]
+    slack_token = os.environ["SLACK_TOKEN"]
+    huggingface_api = HfApi(token=hf_token)
+    slack_client = WebClient(token=slack_token)
     dataset_config = DatasetConfig()
     slack_config = SlackConfig()
 
     trending_models_metadata_ds = load_dataset(
-        dataset_config.trending_models_metadata_id, split="train"
+        dataset_config.trending_models_metadata_id, split="train", token=hf_token
     )
-    # filter models without ggufs and discussion tabs
+
+    # filter models to be executed:
+    # 1. gguf models
+    # 2. models with no discussion tab
+    # 3. if the repo has a notebook inside (this is meant to change later)
     targeted_models = trending_models_metadata_ds.filter(
-        lambda x: not x["should_skip"]
+        lambda x: not x["should_skip_code_exec"]
     )["id"]
 
     # could have used the threadpooler, but this function works on files (which is async)
@@ -294,11 +302,14 @@ if __name__ == "__main__":
             ds_config=dataset_config,
             huggingface_api=huggingface_api,
             channel_name=slack_config.channel_name,
+            hf_token=hf_token,
         )
         dataset_rows.append(asdict(model_code_info))
 
     model_code_info_ds = Dataset.from_list(dataset_rows)
-    model_code_info_ds.push_to_hub(dataset_config.hf_jobs_url_dataset_id)
+    model_code_info_ds.push_to_hub(
+        dataset_config.hf_jobs_url_dataset_id, token=hf_token
+    )
     send_slack_message(
         client=slack_client,
         channel_name=slack_config.channel_name,

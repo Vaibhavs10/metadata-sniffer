@@ -33,7 +33,7 @@ class OpenAvocadoDiscussion:
 @dataclass
 class ModelMetadataResult:
     id: str
-    should_skip: bool = False  # only skip if GGUF or no discussion tabs
+    should_skip_code_exec: bool = False
     metadata_issues: List[str] = field(default_factory=list)
     open_discussions_with_avocado_participation: List[OpenAvocadoDiscussion] = field(
         default_factory=list
@@ -43,8 +43,7 @@ class ModelMetadataResult:
 class MetadataIssues(Enum):
     NO_LIBRARY_NAME = "no_library_name"
     NO_PIPELINE_TAG = "no_pipeline_tag"
-    NO_DISCUSSION_TAB = "no_discussion_tab"
-    WITH_GGUF = "with_gguf"
+    HAS_NOTEBOOK = "has_notebook_needs_manual_execution"
 
 
 def _model_link_line(model_id) -> str:
@@ -86,8 +85,7 @@ def analyze_model_metadata(
 
     # we will currently ignore GGUFs
     if "gguf" in (model_info.tags or []):
-        metadata_result.should_skip = True
-        metadata_result.metadata_issues.append(MetadataIssues.WITH_GGUF.value)
+        metadata_result.should_skip_code_exec = True
         logger.info(f"Skipped {model_id} : GGUF")
         return metadata_result
 
@@ -95,8 +93,8 @@ def analyze_model_metadata(
     try:
         discussions = list(huggingface_api.get_repo_discussions(model_id))
     except Exception:
-        metadata_result.should_skip = True
-        metadata_result.metadata_issues.append(MetadataIssues.NO_DISCUSSION_TAB.value)
+        metadata_result.should_skip_code_exec = True
+        metadata_result.has_notebook = True
         logger.info(f"Skipped {model_id} : No Discussion Tab")
         return metadata_result
 
@@ -130,20 +128,31 @@ def analyze_model_metadata(
     if model_info.pipeline_tag is None:
         metadata_result.metadata_issues.append(MetadataIssues.NO_PIPELINE_TAG.value)
 
+    # check for notebook present
+    if "notebook.ipynb" in [f.rfilename for f in model_info.siblings]:
+        metadata_result.should_skip_code_exec = True
+        metadata_result.metadata_issues.append(MetadataIssues.HAS_NOTEBOOK.value)
+        logger.info(f"Notebook found in {model_id}")
+
     return metadata_result
 
 
 if __name__ == "__main__":
     # configuration
-    huggingface_api = HfApi(token=os.environ["HF_TOKEN"])
-    slack_client = WebClient(token=os.environ["SLACK_TOKEN"])
+    hf_token = os.environ["HF_TOKEN"]
+    slack_token = os.environ["SLACK_TOKEN"]
+    huggingface_api = HfApi(token=hf_token)
+    slack_client = WebClient(token=slack_token)
     dataset_config = DatasetConfig()
     slack_config = SlackConfig()
     model_checker_config = ModelCheckerConfig()
 
     # fetch the top N trending models
     trending_models = huggingface_api.list_models(
-        sort="trendingScore", limit=model_checker_config.num_trending_models
+        sort="trendingScore",
+        limit=model_checker_config.num_trending_models,
+        token=hf_token,
+        full=True,  # need to get the repo siblings
     )
 
     # process model metadata
@@ -196,10 +205,6 @@ if __name__ == "__main__":
 
     # alert slack with the issues
     for issue_type, models in models_by_issue_type.items():
-        # we skip the no discussion tab and gguf categories
-        if issue_type in ["no_discussion_tab", "with_gguf"]:
-            continue
-
         title_msg = SlackMessage(
             text=f"*{' '.join(issue_type.split('_'))}*",
             msg_type=SlackMessageType.SECTION,
@@ -252,7 +257,9 @@ if __name__ == "__main__":
         )
 
     # Push the model dataset to Hub
-    trending_models_metadata_ds.push_to_hub(dataset_config.trending_models_metadata_id)
+    trending_models_metadata_ds.push_to_hub(
+        dataset_config.trending_models_metadata_id, token=hf_token
+    )
     send_slack_message(
         client=slack_client,
         channel_name=slack_config.channel_name,
