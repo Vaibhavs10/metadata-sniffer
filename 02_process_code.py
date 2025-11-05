@@ -25,9 +25,14 @@ UV_SCRIPT_HEADER = """\
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
+#     "numpy",
+#     "einops",
+#     "pandas",
+#     "protobuf",
 #     "torch",
 #     "torchvision",
 #     "transformers",
+#     "timm",
 #     "diffusers",
 #     "sentence-transformers",
 #     "accelerate",
