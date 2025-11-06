@@ -30,6 +30,7 @@ UV_SCRIPT_HEADER = """\
 #     "pandas",
 #     "protobuf",
 #     "torch",
+#     "sentencepiece",
 #     "torchvision",
 #     "transformers",
 #     "timm",
