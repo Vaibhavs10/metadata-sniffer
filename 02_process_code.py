@@ -29,7 +29,6 @@ UV_SCRIPT_HEADER = """\
 #     "einops",
 #     "pandas",
 #     "matplotlib",
-#     "paddleocr",
 #     "protobuf",
 #     "torch",
 #     "sentencepiece",
